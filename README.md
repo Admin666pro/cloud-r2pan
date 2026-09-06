@@ -118,7 +118,58 @@ npm run tail
 
 ---
 
-## 五、工作流部署（CI/CD · GitHub Actions）
+## 五、图形化 Web 部署（Cloudflare 控制台）
+
+这套流程全部在**浏览器里的 Cloudflare 控制台（Dashboard）**完成，适合不熟悉命令行、或想用网页界面管理资源的人。它和上面的命令行部署是**等价、二选一**的关系。
+
+> ⚠️ 提醒：本项目源码是 **TypeScript + 多个 `.html` 文本模块**（`wrangler.jsonc` 里配了 `rules`），Cloudflare 网页编辑器无法直接打包这类工程。因此**「建 Worker + 建资源 + 配绑定 + 配密钥」用网页完成**，最后把代码推上去仍需一次 `npm run deploy`（详见步骤 5.6）。这一步只依赖你电脑上已有的 npm，资源管理平时都在网页端看。
+
+### 5.0 准备
+- 一个已登录的 [Cloudflare 控制台](https://dash.cloudflare.com)
+
+### 5.1 创建 R2 存储桶
+1. 左侧菜单 → **R2** → **Create bucket**
+2. 名称填 `crystal-drive` → 选区域 → **Create bucket**
+
+### 5.2 创建 D1 数据库
+1. 左侧菜单 → **D1** → **Create database**
+2. 名称填 `crystal-drive` → **Create**
+3. **复制页面上的 `database_id`**（形如 UUID），下面绑定要用
+
+### 5.3 创建 Worker
+1. 左侧菜单 → **Workers & Pages** → **Create** → **Worker**
+2. 名称填 `crystal-drive` → **Deploy** → 进入该 Worker 页面
+
+### 5.4 添加绑定（Bindings）
+1. 在该 Worker 里 → **Settings** → **Bindings** → **Add binding**
+2. 添加 **R2 Bucket**：
+   - **Variable name** 填 `BUCKET`（绑定名固定，勿改）
+   - R2 bucket 选 `crystal-drive`
+3. 添加 **D1 Database**：
+   - **Variable name** 填 `DB`（绑定名固定，勿改）
+   - 选 `crystal-drive`（或直接粘贴第 5.2 步的 `database_id`）
+
+### 5.5 设置管理密钥 ADMIN_KEY
+1. 同一个 Worker → **Settings** → **Variables and Secrets** → **Add** → **Secret**
+2. Variable name 填 `ADMIN_KEY`，值填你的管理密码 → **Deploy**
+
+### 5.6 上传代码（网页版最后一步）
+本地一次命令完成代码部署（网页端负责资源/绑定/密钥）：
+```bash
+cd 项目目录
+npm install
+npm run deploy
+```
+
+### 5.7 访问
+- 管理后台：`https://crystal-drive.<你的账号>.workers.dev/admin`（用 `ADMIN_KEY` 登录）
+- 分享页格式：`https://crystal-drive.<你的账号>.workers.dev/s/<token>`
+
+> 日常用网页端查看：**Workers → crystal-drive → Console / Logs / Metrics**（日志、监控）、**Settings → Variables/Bindings**（改密钥/绑定）。
+
+---
+
+## 六、工作流部署（CI/CD · GitHub Actions）
 
 项目目前**尚未**包含工作流文件。以下为推荐配置，可按需创建
 `.github/workflows/deploy.yml`。
@@ -198,7 +249,7 @@ jobs:
 
 ---
 
-## 六、环境差异与注意事项
+## 七、环境差异与注意事项
 
 - **本地开发**：绑定在本地无真实资源，D1 / R2 由 Miniflare 模拟；`.dev.vars` 提供 `ADMIN_KEY`。
   请把 `.dev.vars` 加入 `.gitignore`，不要提交到仓库。
@@ -212,7 +263,7 @@ jobs:
 
 ---
 
-## 七、常见问题
+## 八、常见问题
 
 | 问题 | 处理 |
 |---|---|
@@ -220,3 +271,4 @@ jobs:
 | 登录一直失败 | 确认已执行 `npx wrangler secret put ADMIN_KEY`，输入与 `ADMIN_KEY` 一致 |
 | 上传对象在 R2 找不到 | 确认 R2 桶名 `crystal-drive` 已创建且与配置一致 |
 | 想部署到其它名称 | 改 `wrangler.jsonc` 的 `name` 字段 |
+| 网页端建了资源，代码还没生效 | 控制台只负责 R2/D1/绑定/密钥，代码需在本地执行一次 `npm run deploy` |
