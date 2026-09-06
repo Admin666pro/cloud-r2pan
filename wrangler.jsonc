@@ -9,12 +9,12 @@
   //   npx wrangler r2 bucket create crystal-drive
   //   npx wrangler d1 create crystal-drive
   // 并把返回的 database_id 填到下方, 然后设置管理密钥:
-  //   npx wrangler secret put ADMIN_KEY
+  //   npx wrangler secret put admin
   "r2_buckets": [
-    { "binding": "BUCKET", "bucket_name": "crystal-drive" }
+    { "binding": "r2", "bucket_name": "crystal-drive" }
   ],
   "d1_databases": [
-    { "binding": "DB", "database_name": "crystal-drive", "database_id": "LOCAL_PLACEHOLDER" }
+    { "binding": "db", "database_name": "crystal-drive", "database_id": "LOCAL_PLACEHOLDER" }
   ],
 
   // 将 public/*.html 作为文本模块导入

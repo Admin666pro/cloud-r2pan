@@ -36,7 +36,7 @@ function toInt(v: unknown, fallback: number): number {
 }
 
 export async function getSettings(env: Env): Promise<Settings> {
-  const { results } = await env.DB.prepare(
+  const { results } = await env.db.prepare(
     "SELECT key, value FROM settings"
   ).all<{ key: string; value: string }>();
   const map = new Map((results ?? []).map((r) => [r.key, r.value]));
@@ -55,11 +55,11 @@ export async function getSettings(env: Env): Promise<Settings> {
 /** 更新设置（仅覆盖传入的字段） */
 export async function updateSettings(env: Env, patch: Partial<Record<string, string>>): Promise<void> {
   const upserts = Object.entries(patch).map(([key, value]) =>
-    env.DB.prepare(
+    env.db.prepare(
       "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     ).bind(key, String(value))
   );
-  if (upserts.length > 0) await env.DB.batch(upserts);
+  if (upserts.length > 0) await env.db.batch(upserts);
 }
 
 /** 记录一次下载产生的流量，跨月自动重置 */
@@ -68,14 +68,14 @@ export async function addTraffic(env: Env, s: Settings, bytes: number): Promise<
   const month = now.toISOString().slice(0, 7);
   const day = now.toISOString().slice(0, 10);
   const newUsed = (s.trafficMonth === month ? s.trafficUsedBytes : 0) + bytes;
-  await env.DB.batch([
-    env.DB.prepare(
+  await env.db.batch([
+    env.db.prepare(
       "INSERT INTO settings(key, value) VALUES('traffic_used_bytes', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     ).bind(String(newUsed)),
-    env.DB.prepare(
+    env.db.prepare(
       "INSERT INTO settings(key, value) VALUES('traffic_month', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     ).bind(month),
-    env.DB.prepare(
+    env.db.prepare(
       "INSERT INTO traffic_stats(day, bytes, downloads) VALUES(?1, ?2, 1) ON CONFLICT(day) DO UPDATE SET bytes = bytes + excluded.bytes, downloads = downloads + excluded.downloads"
     ).bind(day, bytes),
   ]);

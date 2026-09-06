@@ -41,7 +41,7 @@ function getCookie(req: Request, name: string): string | null {
 /** 登录成功后签发会话 Cookie（不加 Secure 以兼容本地 http 调试） */
 export async function createSession(env: Env): Promise<string> {
   const exp = Date.now() + SESSION_TTL_MS;
-  const sig = await hmac(env.ADMIN_KEY, String(exp));
+  const sig = await hmac(env.admin, String(exp));
   const token = `${exp}.${sig}`;
   return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_TTL_MS / 1000}`;
 }
@@ -55,15 +55,15 @@ export async function verifySession(req: Request, env: Env): Promise<boolean> {
   const exp = token.slice(0, dot);
   const sig = token.slice(dot + 1);
   if (!/^\d+$/.test(exp) || Number(exp) < Date.now()) return false;
-  const expect = await hmac(env.ADMIN_KEY, exp);
+  const expect = await hmac(env.admin, exp);
   return safeEqual(sig, expect);
 }
 
 /** 校验登录密钥（恒定时间比较） */
 export async function checkAdminKey(env: Env, input: string): Promise<boolean> {
-  if (!env.ADMIN_KEY) return false;
-  const a = await hmac(env.ADMIN_KEY, input);
-  const b = await hmac(env.ADMIN_KEY, env.ADMIN_KEY);
+  if (!env.admin) return false;
+  const a = await hmac(env.admin, input);
+  const b = await hmac(env.admin, env.admin);
   return safeEqual(a, b);
 }
 
