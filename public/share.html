@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>分享 · Crystal Drive</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 24px; color: #fff; overflow: hidden; position: relative;
+  background: linear-gradient(160deg, #0b1026 0%, #1a1240 45%, #2a1045 100%);
+  -webkit-tap-highlight-color: transparent;
+}
+.orb { position: fixed; border-radius: 50%; filter: blur(90px); opacity: .5; pointer-events: none; animation: drift 18s ease-in-out infinite alternate; }
+.o1 { width: 46vmax; height: 46vmax; background: #38bdf8; top: -18%; left: -14%; }
+.o2 { width: 40vmax; height: 40vmax; background: #8b5cf6; bottom: -20%; right: -10%; animation-delay: -6s; }
+.o3 { width: 30vmax; height: 30vmax; background: #ec4899; top: 55%; left: 8%; animation-delay: -12s; opacity: .35; }
+@keyframes drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(6vw, -5vh) scale(1.12); } }
+
+.card {
+  position: relative; width: 100%; max-width: 440px;
+  padding: 48px 36px 40px; border-radius: 36px; text-align: center;
+  background: linear-gradient(145deg, rgba(255,255,255,.16), rgba(255,255,255,.05));
+  backdrop-filter: blur(32px) saturate(180%); -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border: 1px solid rgba(255,255,255,.28);
+  box-shadow: 0 24px 60px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.35);
+  animation: rise .65s cubic-bezier(.22,1.2,.36,1) both;
+}
+@keyframes rise { from { opacity: 0; transform: translateY(28px) scale(.95); } to { opacity: 1; transform: none; } }
+
+.file-icon {
+  width: 104px; height: 104px; margin: 0 auto 24px; border-radius: 30px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(145deg, rgba(255,255,255,.28), rgba(255,255,255,.08));
+  border: 1px solid rgba(255,255,255,.32);
+  box-shadow: inset 0 2px 0 rgba(255,255,255,.45), 0 14px 34px rgba(0,0,0,.35);
+  position: relative; overflow: hidden;
+}
+.file-icon::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(120deg, transparent 30%, rgba(255,255,255,.35) 48%, transparent 62%);
+  transform: translateX(-120%); animation: shine 4.5s ease-in-out infinite;
+}
+@keyframes shine { 0%, 60% { transform: translateX(-120%); } 85%, 100% { transform: translateX(120%); } }
+.file-icon .ext { font-size: 26px; font-weight: 800; letter-spacing: -.02em; text-shadow: 0 2px 8px rgba(0,0,0,.25); }
+
+h1 { font-size: 21px; font-weight: 700; letter-spacing: -.02em; word-break: break-all; line-height: 1.35; }
+.meta { margin-top: 10px; font-size: 14px; color: rgba(255,255,255,.72); display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; }
+.meta .dot { width: 3px; height: 3px; border-radius: 50%; background: rgba(255,255,255,.4); }
+
+.stats { display: flex; gap: 10px; margin-top: 26px; }
+.stat {
+  flex: 1; padding: 14px 8px; border-radius: 20px;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+}
+.stat .v { font-size: 20px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.stat .k { margin-top: 3px; font-size: 12px; color: rgba(255,255,255,.6); }
+
+.btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; margin-top: 28px; padding: 17px; border: none; border-radius: 22px;
+  font-size: 17px; font-weight: 650; letter-spacing: -.01em; color: #fff; cursor: pointer;
+  background: linear-gradient(180deg, #3d9bff, #0a7cff);
+  box-shadow: 0 12px 30px rgba(10,124,255,.42), inset 0 1px 0 rgba(255,255,255,.35);
+  transition: transform .15s cubic-bezier(.22,1.2,.36,1), box-shadow .2s;
+  text-decoration: none; -webkit-user-select: none; user-select: none;
+}
+.btn:hover { transform: translateY(-1px) scale(1.01); }
+.btn:active { transform: scale(.97); }
+.btn[disabled], btn.disabled { opacity: .45; cursor: not-allowed; transform: none !important; }
+.btn svg { width: 19px; height: 19px; }
+
+.hint { margin-top: 14px; font-size: 12.5px; color: rgba(255,255,255,.55); line-height: 1.6; }
+
+.warn { margin-top: 18px; padding: 13px 16px; border-radius: 16px; font-size: 13.5px; line-height: 1.55;
+  background: rgba(255,159,10,.14); border: 1px solid rgba(255,159,10,.35); color: #ffd9a0; }
+
+.loading { padding: 80px 0; text-align: center; }
+.spinner { width: 34px; height: 34px; margin: 0 auto 16px; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.18); border-top-color: #fff; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.brand { position: fixed; bottom: max(22px, env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center;
+  font-size: 13px; color: rgba(255,255,255,.4); letter-spacing: .08em; }
+.brand b { font-weight: 650; }
+</style>
+</head>
+<body>
+<div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>
+
+<div class="card" id="app">
+  <div class="loading">
+    <div class="spinner"></div>
+    <div style="font-size:14px;color:rgba(255,255,255,.65)">正在加载分享信息…</div>
+  </div>
+</div>
+
+<div class="brand" id="brand">Powered by <b>Crystal Drive</b></div>
+
+<script>
+const EXT_COLORS = {
+  zip:'#ffb340', rar:'#ffb340', '7z':'#ffb340', tar:'#ffb340', gz:'#ffb340',
+  pdf:'#ff6961', doc:'#5b9cf5', docx:'#5b9cf5', txt:'#9aa4b2', md:'#9aa4b2',
+  xls:'#3ecf8e', xlsx:'#3ecf8e', csv:'#3ecf8e', ppt:'#ff9f0a', pptx:'#ff9f0a',
+  mp3:'#bf5af2', wav:'#bf5af2', flac:'#bf5af2', m4a:'#bf5af2',
+  mp4:'#ff453a', mov:'#ff453a', mkv:'#ff453a', avi:'#ff453a',
+  png:'#30d158', jpg:'#30d158', jpeg:'#30d158', gif:'#30d158', webp:'#30d158', svg:'#30d158',
+  apk:'#3ecf8e', exe:'#9aa4b2', iso:'#9aa4b2', dmg:'#9aa4b2', default:'#8ea0c8'
+};
+function extOf(name){ const m=/\.([a-z0-9]+)$/i.exec(name||''); return m?m[1].toLowerCase():''; }
+function extColor(name){ return EXT_COLORS[extOf(name)]||EXT_COLORS.default; }
+function fmtSize(n){
+  if(!Number.isFinite(n))return '—';
+  if(n<1024)return n+' B';
+  const u=['KB','MB','GB','TB'];let i=-1;
+  do{n/=1024;i++;}while(n>=1024&&i<u.length-1);
+  return n.toFixed(n>=100?0:n>=10?1:2)+' '+u[i];
+}
+function fmtTime(ts){
+  const d=new Date(ts),p=x=>String(x).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+const token = location.pathname.split('/')[2];
+
+async function boot(){
+  let info;
+  try{
+    const r = await fetch(`/s/${token}/info`, {cache:'no-store'});
+    if(!r.ok) throw 0;
+    info = await r.json();
+  }catch{ renderError('链接不存在','该分享链接无效，或已被管理员删除。'); return; }
+  if(document.getElementById('brand') && info.site_title){
+    document.getElementById('brand').innerHTML = `Powered by <b>${esc(info.site_title)}</b>`;
+    document.title = `${info.name} · ${info.site_title}`;
+  }
+  render(info);
+}
+
+function renderError(title,msg){
+  document.getElementById('app').innerHTML = `
+    <div class="file-icon" style="font-size:44px">🚫</div>
+    <h1>${esc(title)}</h1>
+    <div class="hint" style="margin-top:12px">${esc(msg)}</div>`;
+}
+
+function render(d){
+  const ext = extOf(d.name);
+  const gone = {
+    gone:['链接已失效','该分享已被管理员撤销。'],
+    expired:['链接已过期','该分享已超过有效期，无法继续下载。'],
+    maxed:['下载次数已达上限',`该资源允许下载 ${d.max_downloads} 次，名额已用完。`]
+  }[d.status];
+  if(gone){ renderError(gone[0],gone[1]); return; }
+
+  document.getElementById('app').innerHTML = `
+    <div class="file-icon"><span class="ext" style="color:${extColor(d.name)}">${esc((ext||'FILE').toUpperCase())}</span></div>
+    <h1>${esc(d.name)}</h1>
+    <div class="meta">
+      <span>${fmtSize(d.size)}</span>
+      <span class="dot"></span>
+      <span>${fmtTime(d.created_at)} 分享</span>
+      ${d.expires_at?`<span class="dot"></span><span>${fmtTime(d.expires_at)} 到期</span>`:''}
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="v">${d.downloads}</div><div class="k">下载次数</div></div>
+      <div class="stat"><div class="v">${d.max_downloads??'∞'}</div><div class="k">次数上限</div></div>
+      <div class="stat"><div class="v">${fmtSize(d.size)}</div><div class="k">文件大小</div></div>
+    </div>
+    ${d.quota_exceeded?`<div class="warn">⚠️ 本月流量已达预设限额，下载服务已临时暂停，请联系管理员。</div>`:''}
+    <a class="btn" id="dl" href="/s/${token}/download" ${d.quota_exceeded?'style="pointer-events:none;opacity:.45"':''}>
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4 20h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      下载文件
+    </a>
+    <div class="hint">下载由 ${esc(d.site_title||'Crystal Drive')} 提供 · 请勿重复下载</div>`;
+}
+
+boot();
+</script>
+</body>
+</html>
