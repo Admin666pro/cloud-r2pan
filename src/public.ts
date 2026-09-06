@@ -81,28 +81,64 @@ export async function handleDownload(
     if (ban.expires_at && ban.expires_at < Date.now()) {
       await env.DB.prepare("DELETE FROM banned_ips WHERE ip = ?1").bind(ip).run();
     } else {
-      return errorPage(403, "访问已被封禁", ban.reason || "由于重复下载行为，该 IP 已被暂时封禁。");
+      return errorPage(
+        req,
+        403,
+        { zh: "访问已被封禁", en: "Access Banned" },
+        {
+          zh: ban.reason || "由于重复下载行为，该 IP 已被暂时封禁。",
+          en: ban.reason || "This IP has been temporarily banned due to repeated download behavior.",
+        }
+      );
     }
   }
 
   // 2. 分享有效性
   const row = await getShare(env, token);
-  if (!row) return errorPage(404, "链接不存在", "该分享链接无效，或已被管理员删除。");
+  if (!row)
+    return errorPage(
+      req,
+      404,
+      { zh: "链接不存在", en: "Link Not Found" },
+      { zh: "该分享链接无效，或已被管理员删除。", en: "This share link is invalid or has been removed." }
+    );
   if (row.revoked)
-    return errorPage(410, "链接已失效", "该分享已被管理员撤销。");
+    return errorPage(
+      req,
+      410,
+      { zh: "链接已失效", en: "Link Revoked" },
+      { zh: "该分享已被管理员撤销。", en: "This share has been revoked by the administrator." }
+    );
   if (row.expires_at && row.expires_at < Date.now())
-    return errorPage(410, "链接已过期", "该分享已超过有效期，无法继续下载。");
+    return errorPage(
+      req,
+      410,
+      { zh: "链接已过期", en: "Link Expired" },
+      { zh: "该分享已超过有效期，无法继续下载。", en: "This share has expired and is no longer available." }
+    );
   if (row.max_downloads && row.download_count >= row.max_downloads)
-    return errorPage(410, "下载次数已达上限", `该资源允许下载 ${row.max_downloads} 次，名额已用完。`);
+    return errorPage(
+      req,
+      410,
+      { zh: "下载次数已达上限", en: "Download Limit Reached" },
+      {
+        zh: `该资源允许下载 ${row.max_downloads} 次，名额已用完。`,
+        en: `This resource allows ${row.max_downloads} downloads and the quota is used up.`,
+      }
+    );
 
   const settings = await getSettings(env);
 
   // 3. 流量限额：达到预设上限立即暂停所有下载（防止流量超额扣费）
   if (settings.trafficLimitBytes > 0 && settings.trafficUsedBytes >= settings.trafficLimitBytes) {
     return errorPage(
+      req,
       503,
-      "下载已暂停",
-      "本月流量已达预设限额，为避免产生额外费用，下载服务已自动暂停。请联系管理员调整限额或重置流量。",
+      { zh: "下载已暂停", en: "Downloads Paused" },
+      {
+        zh: "本月流量已达预设限额，为避免产生额外费用，下载服务已自动暂停。请联系管理员调整限额或重置流量。",
+        en: "The monthly traffic quota has been reached. To avoid extra charges, downloads are automatically paused. Please contact the administrator to raise the quota or reset traffic.",
+      },
       { siteTitle: settings.siteTitle }
     );
   }
@@ -134,10 +170,17 @@ export async function handleDownload(
           .run();
       }
       return errorPage(
+        req,
         403,
-        "重复下载被拦截",
-        `同一 IP 在统计窗口内下载此资源的次数已达上限（${settings.maxDownloadsPerIp} 次）。` +
-          (settings.autoBan ? "该 IP 已被自动封禁。" : ""),
+        { zh: "重复下载被拦截", en: "Duplicate Download Blocked" },
+        {
+          zh:
+            `同一 IP 在统计窗口内下载此资源的次数已达上限（${settings.maxDownloadsPerIp} 次）。` +
+            (settings.autoBan ? "该 IP 已被自动封禁。" : ""),
+          en:
+            `This IP has reached the download limit for this resource within the counting window (${settings.maxDownloadsPerIp}).` +
+            (settings.autoBan ? " The IP has been automatically banned." : ""),
+        },
         { siteTitle: settings.siteTitle }
       );
     }
@@ -149,9 +192,20 @@ export async function handleDownload(
   try {
     obj = (await env.BUCKET.get(row.key, range ? { range } : undefined)) as R2ObjectBody;
   } catch {
-    return errorPage(416, "请求范围无效", "Range 请求无法满足，请重新下载。");
+    return errorPage(
+      req,
+      416,
+      { zh: "请求范围无效", en: "Invalid Range" },
+      { zh: "Range 请求无法满足，请重新下载。", en: "The range request cannot be satisfied. Please restart the download." }
+    );
   }
-  if (!obj) return errorPage(404, "文件不存在", "文件可能已被删除，请联系管理员。");
+  if (!obj)
+    return errorPage(
+      req,
+      404,
+      { zh: "文件不存在", en: "File Not Found" },
+      { zh: "文件可能已被删除，请联系管理员。", en: "The file may have been deleted. Please contact the administrator." }
+    );
 
   const headers = new Headers();
   obj.writeHttpMetadata(headers);

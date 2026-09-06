@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Crystal Drive · 管理后台</title>
+<title>Crystal Drive</title>
 <style>
 :root {
   --glass: rgba(255,255,255,.09);
@@ -95,8 +95,6 @@ body {
   color: #fff; background: rgba(255,255,255,.16);
   box-shadow: 0 4px 14px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.25);
 }
-.seg button .badge { display: inline-block; min-width: 18px; padding: 1px 5px; margin-left: 5px; border-radius: 9px;
-  background: rgba(10,132,255,.85); font-size: 11px; line-height: 1.5; vertical-align: 1px; }
 
 /* ── 统计卡片 ─────────────────────────── */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 18px; }
@@ -112,7 +110,7 @@ body {
 
 /* ── 通用卡片区块 ─────────────────────── */
 .section { padding: 22px; margin-bottom: 18px; }
-.section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 10px; flex-wrap: wrap; }
 .section-title h2 { font-size: 16px; font-weight: 700; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
 
 /* ── 图表 ─────────────────────────────── */
@@ -211,6 +209,7 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .group .row input[type=number]:focus { border-color: rgba(10,132,255,.7); }
+.group .row input[type=text] { width: 170px; text-align: left; }
 
 /* iOS 开关 */
 .switch { position: relative; width: 50px; height: 30px; flex: none; cursor: pointer; }
@@ -254,7 +253,7 @@ body {
   padding: 11px 22px; border-radius: 16px; font-size: 14px; font-weight: 600; color: #fff;
   background: rgba(30,28,60,.88); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--stroke-strong); box-shadow: 0 12px 32px rgba(0,0,0,.45);
-  animation: toastIn .35s cubic-bezier(.22,1.2,.36,1) both;
+  animation: toastIn .35s cubic-bezier(.22,1.2,.36,1) both; max-width: 86vw; text-align: center;
 }
 .toast.ok { border-color: rgba(52,211,153,.5); }
 .toast.err { border-color: rgba(255,69,58,.55); }
@@ -295,6 +294,7 @@ body {
 .login-card input:focus { border-color: rgba(10,132,255,.75); background: rgba(255,255,255,.13); }
 .login-card .btn { width: 100%; margin-top: 14px; padding: 15px; font-size: 16px; border-radius: 18px; }
 .login-card .err { margin-top: 12px; font-size: 13px; color: #fda293; min-height: 18px; }
+.login-card .lang-row { margin-top: 18px; }
 .shake { animation: shake .4s; }
 @keyframes shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-9px)} 40%,80%{transform:translateX(9px)} }
 
@@ -315,6 +315,182 @@ body {
 <div id="app"><div class="spin"></div></div>
 
 <script>
+/* ═══════════ i18n ═══════════ */
+const I18N = {
+  zh: {
+    docTitle: '{site} · 管理后台',
+    // 通用
+    login: '登录', logout: '退出', cancel: '取消', confirm: '确定', copy: '复制', close: '关闭',
+    copied: '已复制到剪贴板', save: '保存设置', saved: '设置已保存', forever: '永久',
+    switchTo: 'EN', topbarSub: '管理后台 · Cloudflare Workers + R2',
+    // 登录
+    loginSubtitle: '管理后台 · 请输入管理密钥登录', keyPlaceholder: '管理密钥 (ADMIN_KEY)',
+    // 标签
+    tabOverview: '概览', tabFiles: '文件', tabShares: '分享', tabLogs: '记录', tabBans: '封禁', tabSettings: '设置',
+    // 概览
+    statTraffic: '本月流量', usedPercent: '已用 {n}% · 跨月自动重置', noLimit: '未设置限额',
+    statDownloads: '累计下载', todayN: '今日 {n} 次', statFiles: '文件总数', storedR2: '存储于 R2 对象存储',
+    statShares: '分享链接', sharesFoot: '有效 {a} 个 · 封禁 IP {b} 个',
+    chartTitle: '近 14 天下载趋势', recentTitle: '最近下载', viewAll: '查看全部', noLogsYet: '还没有下载记录',
+    quotaBannerT: '流量已达预设限额，下载服务已自动暂停',
+    quotaBannerD: '所有公开下载请求都会被拦截。你可以在「设置」中调高限额，或重置本月流量。',
+    times: '次', unlimitedShort: '无限',
+    // 表格列
+    colFile: '文件', colIP: 'IP', colBrowser: '浏览器', colOS: '系统', colTraffic: '流量', colTime: '时间',
+    colCountry: '国家', colName: '文件名', colSize: '大小', colShareCount: '分享数', colDownloads: '下载量',
+    colUploaded: '上传时间', colActions: '操作', colLink: '链接', colCreated: '创建时间',
+    colExpires: '有效期', colStatus: '状态', colReason: '原因', colBannedAt: '封禁时间', colUntil: '到期',
+    // 文件
+    dropTitle: '拖拽文件到此处，或点击上传',
+    dropDesc: '单文件最大 100 MB（Workers 请求限制）· 直传 R2 对象存储',
+    allFiles: '全部文件', noFiles: '还没有文件，上传一个试试', createShare: '创建分享', del: '删除',
+    tooLarge: '「{name}」超过 100 MB 限制', uploadOk: '「{name}」上传成功', uploadFail: '「{name}」上传失败',
+    uploadDone: '完成 ✅', uploadFailShort: '失败',
+    // 分享弹窗
+    shareModalTitle: '创建分享链接', shareModalSub: '生成公开下载链接，可设置有效期与下载次数上限',
+    validity: '有效期', perm: '永久有效', h1: '1 小时', d1: '1 天', d7: '7 天', d30: '30 天',
+    maxDownloadsLabel: '下载次数上限（留空或 0 = 不限）', unlimitedPlaceholder: '不限',
+    maxTip: '达到上限后链接自动失效。单 IP 重复下载限制由「设置」统一控制。',
+    generate: '生成链接', shareCreated: '分享链接已创建 ✨', shareCreatedSub: '复制下面的链接发给需要的人',
+    preview: '预览分享页',
+    // 分享列表
+    sharesTitle: '分享链接', cleanup: '清理失效分享',
+    stActive: '有效', stExpired: '已过期', stRevoked: '已撤销', stMaxed: '已满额',
+    revoke: '撤销', noShares: '还没有分享链接，去「文件」页创建一个',
+    confirmCleanupT: '清理失效分享', confirmCleanupD: '将删除所有已过期、已撤销、已达下载上限的分享链接。',
+    cleanedN: '已清理 {n} 条失效分享', shareRevoked: '分享已撤销',
+    confirmRevokeT: '撤销分享', confirmRevokeD: '撤销后该链接将立即失效，无法恢复。',
+    // 记录
+    logsTitle: '下载记录', totalN: '共 {n} 条', searchPlaceholder: '搜索 IP / 文件名…',
+    clear30: '清理 30 天前', clearAll: '清空全部', prev: '‹ 上一页', next: '下一页 ›', pageOf: '第 {a} / {b} 页',
+    noMatch: '没有匹配的记录', noLogs: '还没有下载记录',
+    confirmClear30T: '清理记录', confirmClear30D: '删除 30 天前的所有下载记录，以减少存储占用。',
+    confirmClearAllT: '清空全部记录',
+    confirmClearAllD: '将删除所有下载记录（流量统计与分享下载计数不受影响）。此操作不可恢复。',
+    clearedN: '已清理 {n} 条记录',
+    // 封禁
+    manualBan: '手动封禁 IP', ipPlaceholder: 'IP 地址，如 1.2.3.4', reasonPlaceholder: '原因（可选）', ban: '封禁',
+    banTip: '重复下载超限的 IP 会被系统自动封禁（可在「设置」调整参数），此处可手动补充封禁。',
+    banList: '封禁名单', unban: '解封', noBans: '当前没有封禁任何 IP',
+    bannedIp: '已封禁 {ip}', unbannedIp: '已解封 {ip}', enterIp: '请输入 IP 地址',
+    // 设置
+    siteName: '站点名称', siteNameD: '显示在分享页和后台标题',
+    trafficLimit: '月度流量限额（GB）',
+    trafficLimitD: '本月已用 {used}。流量达到限额后，所有下载自动暂停，防止流量超额产生费用。设为 0 表示不限制，每月自动重置。',
+    resetTraffic: '重置本月流量', resetTrafficD: '将已用流量清零，立即恢复下载服务', reset: '重置',
+    perIp: '单 IP 最大下载次数',
+    perIpD: '同一 IP 在统计窗口内对同一资源最多可下载的次数，超出后拦截。设为 0 表示不限制。',
+    window: '统计窗口（小时）', windowD: '统计单 IP 重复下载的时间范围。设为 0 表示永久累计。',
+    autoBan: '超限自动封禁', autoBanD: '开启后，重复下载超限的 IP 会被自动加入封禁名单',
+    banHours: '封禁时长（小时）', banHoursD: '自动封禁的持续时间，到期自动解封。设为 0 表示永久封禁直至手动解封。',
+    clearLogs: '清除下载记录', clearLogsD: '删除下载明细以减少 D1 存储占用（流量统计与分享下载计数不受影响）',
+    trafficResetOk: '本月流量已重置', confirmResetT: '重置流量',
+    confirmResetD: '将本月已用流量清零并立即恢复下载服务？',
+    // 文件删除
+    deleteFileT: '删除文件', deleteFileD: '确定删除「{name}」？其所有分享链接和下载记录也会一并删除。',
+    fileDeleted: '文件已删除',
+    loadingErr: '加载失败',
+  },
+  en: {
+    docTitle: '{site} · Admin Console',
+    // 通用
+    login: 'Log in', logout: 'Log out', cancel: 'Cancel', confirm: 'Confirm', copy: 'Copy', close: 'Close',
+    copied: 'Copied to clipboard', save: 'Save Settings', saved: 'Settings saved', forever: 'Forever',
+    switchTo: '中文', topbarSub: 'Admin console · Cloudflare Workers + R2',
+    // 登录
+    loginSubtitle: 'Admin console · Enter your admin key to continue', keyPlaceholder: 'Admin key (ADMIN_KEY)',
+    // 标签
+    tabOverview: 'Overview', tabFiles: 'Files', tabShares: 'Shares', tabLogs: 'Logs', tabBans: 'Bans', tabSettings: 'Settings',
+    // 概览
+    statTraffic: 'Monthly Traffic', usedPercent: '{n}% used · resets monthly', noLimit: 'No limit set',
+    statDownloads: 'Total Downloads', todayN: '{n} today', statFiles: 'Files', storedR2: 'Stored in R2 object storage',
+    statShares: 'Share Links', sharesFoot: '{a} active · {b} banned IPs',
+    chartTitle: 'Downloads · Last 14 Days', recentTitle: 'Recent Downloads', viewAll: 'View all', noLogsYet: 'No downloads yet',
+    quotaBannerT: 'Traffic quota reached — downloads auto-paused',
+    quotaBannerD: 'All public download requests are blocked. Raise the limit in Settings or reset this month\'s traffic.',
+    times: '', unlimitedShort: 'Unlimited',
+    // 表格列
+    colFile: 'File', colIP: 'IP', colBrowser: 'Browser', colOS: 'OS', colTraffic: 'Traffic', colTime: 'Time',
+    colCountry: 'Country', colName: 'Name', colSize: 'Size', colShareCount: 'Shares', colDownloads: 'Downloads',
+    colUploaded: 'Uploaded', colActions: 'Actions', colLink: 'Link', colCreated: 'Created',
+    colExpires: 'Expires', colStatus: 'Status', colReason: 'Reason', colBannedAt: 'Banned at', colUntil: 'Until',
+    // 文件
+    dropTitle: 'Drop files here or click to upload',
+    dropDesc: 'Max 100 MB per file (Workers limit) · Stored directly in R2',
+    allFiles: 'All Files', noFiles: 'No files yet — upload one to get started', createShare: 'Share', del: 'Delete',
+    tooLarge: '"{name}" exceeds the 100 MB limit', uploadOk: '"{name}" uploaded', uploadFail: '"{name}" upload failed',
+    uploadDone: 'Done ✅', uploadFailShort: 'Failed',
+    // 分享弹窗
+    shareModalTitle: 'Create Share Link', shareModalSub: 'Generate a public download link with optional expiry and download cap',
+    validity: 'Validity', perm: 'Forever', h1: '1 hour', d1: '1 day', d7: '7 days', d30: '30 days',
+    maxDownloadsLabel: 'Max downloads (empty or 0 = unlimited)', unlimitedPlaceholder: 'Unlimited',
+    maxTip: 'The link expires when the cap is reached. Per-IP duplicate limits are controlled in Settings.',
+    generate: 'Generate Link', shareCreated: 'Share link created ✨', shareCreatedSub: 'Copy the link below and share it',
+    preview: 'Preview',
+    // 分享列表
+    sharesTitle: 'Share Links', cleanup: 'Clean up expired',
+    stActive: 'Active', stExpired: 'Expired', stRevoked: 'Revoked', stMaxed: 'Maxed out',
+    revoke: 'Revoke', noShares: 'No share links yet — create one in Files',
+    confirmCleanupT: 'Clean up expired shares', confirmCleanupD: 'This will delete all expired, revoked and maxed-out share links.',
+    cleanedN: 'Cleaned up {n} expired shares', shareRevoked: 'Share revoked',
+    confirmRevokeT: 'Revoke share', confirmRevokeD: 'The link will stop working immediately. This cannot be undone.',
+    // 记录
+    logsTitle: 'Download Logs', totalN: '{n} total', searchPlaceholder: 'Search IP / file name…',
+    clear30: 'Clear 30d+', clearAll: 'Clear all', prev: '‹ Prev', next: 'Next ›', pageOf: 'Page {a} of {b}',
+    noMatch: 'No matching records', noLogs: 'No download logs yet',
+    confirmClear30T: 'Clear logs', confirmClear30D: 'Delete download logs older than 30 days to save storage.',
+    confirmClearAllT: 'Clear all logs',
+    confirmClearAllD: 'All download logs will be deleted (traffic stats and share counters are unaffected). This cannot be undone.',
+    clearedN: 'Cleared {n} logs',
+    // 封禁
+    manualBan: 'Ban an IP manually', ipPlaceholder: 'IP address, e.g. 1.2.3.4', reasonPlaceholder: 'Reason (optional)', ban: 'Ban',
+    banTip: 'IPs exceeding duplicate-download limits are banned automatically (configurable in Settings). You can also ban manually here.',
+    banList: 'Banned IPs', unban: 'Unban', noBans: 'No IPs are currently banned',
+    bannedIp: 'Banned {ip}', unbannedIp: 'Unbanned {ip}', enterIp: 'Please enter an IP address',
+    // 设置
+    siteName: 'Site Name', siteNameD: 'Shown on the share page and console title',
+    trafficLimit: 'Monthly Traffic Quota (GB)',
+    trafficLimitD: '{used} used this month. Downloads auto-pause when the quota is reached to avoid overage charges. Set 0 for unlimited; resets monthly.',
+    resetTraffic: 'Reset Monthly Traffic', resetTrafficD: 'Zero out used traffic and resume downloads immediately', reset: 'Reset',
+    perIp: 'Max Downloads per IP',
+    perIpD: 'How many times the same IP may download the same resource within the counting window. 0 = unlimited.',
+    window: 'Counting Window (hours)', windowD: 'Time range for counting duplicate downloads per IP. 0 = forever.',
+    autoBan: 'Auto-ban on limit', autoBanD: 'Automatically ban IPs that exceed the duplicate-download limit',
+    banHours: 'Ban Duration (hours)', banHoursD: 'How long auto-bans last. 0 = permanent until manually lifted.',
+    clearLogs: 'Clear Download Logs', clearLogsD: 'Delete log details to save D1 storage (traffic stats and counters unaffected)',
+    trafficResetOk: 'Monthly traffic has been reset', confirmResetT: 'Reset traffic',
+    confirmResetD: 'Zero out this month\'s traffic and resume downloads?',
+    // 文件删除
+    deleteFileT: 'Delete file', deleteFileD: 'Delete "{name}"? All its share links and logs will also be deleted.',
+    fileDeleted: 'File deleted',
+    loadingErr: 'Failed to load',
+  }
+};
+
+/** 语言检测：手动选择 > 浏览器首选语言 > 时区（大中华区） > 英文 */
+function detectLang(){
+  try {
+    const saved = localStorage.getItem('cd_lang');
+    if (saved === 'zh' || saved === 'en') return saved;
+  } catch {}
+  const first = String((navigator.languages && navigator.languages.length ? navigator.languages[0] : navigator.language) || '').toLowerCase();
+  if (first.startsWith('zh')) return 'zh';
+  if (first) return 'en';
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    if (/^Asia\/(Shanghai|Chongqing|Harbin|Urumqi|Kashgar|Hong_Kong|Macau|Taipei)$/.test(tz)) return 'zh';
+  } catch {}
+  return 'en';
+}
+
+let LANG = detectLang();
+const t = (key, params) => {
+  let s = (I18N[LANG] && I18N[LANG][key]) ?? I18N.en[key] ?? key;
+  if (params) for (const k in params) s = s.split('{' + k + '}').join(params[k]);
+  return s;
+};
+document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+
 /* ═══════════ 工具函数 ═══════════ */
 const $ = (s, el=document) => el.querySelector(s);
 const $$ = (s, el=document) => [...el.querySelectorAll(s)];
@@ -364,11 +540,11 @@ function toast(msg, type='ok'){
 }
 
 function copyText(text){
-  if(navigator.clipboard?.writeText) return navigator.clipboard.writeText(text).then(() => toast('已复制到剪贴板'));
+  if(navigator.clipboard?.writeText) return navigator.clipboard.writeText(text).then(() => toast(t('copied')));
   const ta = document.createElement('textarea');
   ta.value = text; document.body.appendChild(ta); ta.select();
   document.execCommand('copy'); ta.remove();
-  return Promise.resolve(toast('已复制到剪贴板'));
+  return Promise.resolve(toast(t('copied')));
 }
 
 const confirmDialog = (title, msg, danger=true) => new Promise(resolve => {
@@ -376,12 +552,17 @@ const confirmDialog = (title, msg, danger=true) => new Promise(resolve => {
     <h3>${esc(title)}</h3>
     <div class="sub">${esc(msg)}</div>
     <div class="actions">
-      <button class="btn" data-x>取消</button>
-      <button class="btn ${danger?'danger':'primary'}" data-ok>确定</button>
+      <button class="btn" data-x>${esc(t('cancel'))}</button>
+      <button class="btn ${danger?'danger':'primary'}" data-ok>${esc(t('confirm'))}</button>
     </div>`);
   $('[data-ok]').onclick = () => { closeModal(); resolve(true); };
   $('[data-x]').onclick = () => { closeModal(); resolve(false); };
 });
+
+function toggleLang(){
+  try { localStorage.setItem('cd_lang', LANG === 'zh' ? 'en' : 'zh'); } catch {}
+  location.reload();
+}
 
 /* ═══════════ 模态框 ═══════════ */
 function openModal(html){
@@ -397,17 +578,19 @@ function closeModal(){ $('#modal')?.remove(); }
 /* ═══════════ 登录视图 ═══════════ */
 let siteTitle = 'Crystal Drive';
 function showLogin(){
+  document.title = t('docTitle', {site: siteTitle});
   $('#app').innerHTML = `
   <div id="login-view">
     <div class="login-card glass">
       <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2L21 8.5V15.5L12 22L3 15.5V8.5L12 2Z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round" fill="rgba(255,255,255,.14)"/><path d="M12 2V22M3 8.5L12 15L21 8.5M3 15.5L12 9L21 15.5" stroke="#fff" stroke-width="1.2" opacity=".65"/></svg></div>
       <h1>${esc(siteTitle)}</h1>
-      <div class="sub">管理后台 · 请输入管理密钥登录</div>
+      <div class="sub">${esc(t('loginSubtitle'))}</div>
       <form id="login-form">
-        <input type="password" id="login-key" placeholder="管理密钥 (ADMIN_KEY)" autocomplete="current-password" autofocus>
-        <button class="btn primary" type="submit">登录</button>
+        <input type="password" id="login-key" placeholder="${esc(t('keyPlaceholder'))}" autocomplete="current-password" autofocus>
+        <button class="btn primary" type="submit">${esc(t('login'))}</button>
         <div class="err" id="login-err"></div>
       </form>
+      <div class="lang-row"><button class="btn sm" id="login-lang">${esc(t('switchTo'))}</button></div>
     </div>
   </div>`;
   $('#login-form').onsubmit = async e => {
@@ -423,6 +606,7 @@ function showLogin(){
       $('.login-card').classList.add('shake');
     }
   };
+  $('#login-lang').onclick = toggleLang;
   $('#login-key').focus();
 }
 
@@ -434,33 +618,35 @@ async function showApp(){
   try{
     const s = await api('/api/admin/session');
     siteTitle = s.site_title || siteTitle;
-    document.title = `${siteTitle} · 管理后台`;
   }catch{}
+  document.title = t('docTitle', {site: siteTitle});
   $('#app').innerHTML = `
   <div class="wrap">
     <div class="topbar">
       <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2L21 8.5V15.5L12 22L3 15.5V8.5L12 2Z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round" fill="rgba(255,255,255,.14)"/><path d="M12 2V22M3 8.5L12 15L21 8.5M3 15.5L12 9L21 15.5" stroke="#fff" stroke-width="1.2" opacity=".65"/></svg></div>
-      <div><h1>${esc(siteTitle)}</h1><div class="sub">管理后台 · Cloudflare Workers + R2</div></div>
+      <div><h1>${esc(siteTitle)}</h1><div class="sub">${esc(t('topbarSub'))}</div></div>
       <div class="spacer"></div>
-      <div class="traffic-pill" id="traffic-pill" title="本月流量（点击跳转设置）">
+      <div class="traffic-pill" id="traffic-pill" title="${esc(t('statTraffic'))}">
         <span class="bar"><i id="pill-bar" style="width:0%"></i></span>
         <span id="pill-text">— / —</span>
       </div>
-      <button class="btn sm" id="logout-btn">退出</button>
+      <button class="btn sm" id="lang-btn">${esc(t('switchTo'))}</button>
+      <button class="btn sm" id="logout-btn">${esc(t('logout'))}</button>
     </div>
     <div class="seg" id="tabs">
-      <button data-tab="overview" class="active">概览</button>
-      <button data-tab="files">文件</button>
-      <button data-tab="shares">分享</button>
-      <button data-tab="logs">记录</button>
-      <button data-tab="bans">封禁</button>
-      <button data-tab="settings">设置</button>
+      <button data-tab="overview" class="active">${esc(t('tabOverview'))}</button>
+      <button data-tab="files">${esc(t('tabFiles'))}</button>
+      <button data-tab="shares">${esc(t('tabShares'))}</button>
+      <button data-tab="logs">${esc(t('tabLogs'))}</button>
+      <button data-tab="bans">${esc(t('tabBans'))}</button>
+      <button data-tab="settings">${esc(t('tabSettings'))}</button>
     </div>
     <div id="view"></div>
   </div>`;
   $$('#tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
   $('#logout-btn').onclick = async () => { await api('/api/admin/logout', {method:'POST'}); showLogin(); };
   $('#traffic-pill').onclick = () => switchTab('settings');
+  $('#lang-btn').onclick = toggleLang;
   switchTab('overview');
 }
 
@@ -470,72 +656,72 @@ function switchTab(tab){
   const v = $('#view');
   v.innerHTML = '<div class="spin"></div>';
   ({ overview: loadOverview, files: loadFiles, shares: loadShares, logs: loadLogs, bans: loadBans, settings: loadSettings })[tab]().catch(e => {
-    v.innerHTML = `<div class="glass section"><div class="empty"><div class="icon">⚠️</div>${esc(e.message)}</div></div>`;
+    v.innerHTML = `<div class="glass section"><div class="empty"><div class="icon">⚠️</div>${esc(e.message === 'unauthorized' ? t('loadingErr') : e.message)}</div></div>`;
   });
 }
 
 /* ═══════════ 概览 ═══════════ */
 async function loadOverview(){
   const s = await api('/api/admin/stats');
-  // 顶栏流量胶囊
   const pill = $('#traffic-pill');
   if(pill){
     pill.classList.toggle('danger', s.traffic.quota_exceeded);
     $('#pill-bar').style.width = (s.traffic.limit > 0 ? Math.min(100, s.traffic.percent) : 0) + '%';
     $('#pill-text').textContent = s.traffic.limit > 0
       ? `${fmtSize(s.traffic.used)} / ${fmtSize(s.traffic.limit)}`
-      : `${fmtSize(s.traffic.used)} / 无限`;
+      : `${fmtSize(s.traffic.used)} / ${t('unlimitedShort')}`;
   }
   const maxDl = Math.max(1, ...s.chart.map(c => c.downloads));
   const c = s.counts;
+  const tip = n => LANG === 'zh' ? `${n} ${t('times')} · ${fmtSize(0)}` : `${n} · ${fmtSize(0)}`;
   $('#view').innerHTML = `
     ${s.traffic.quota_exceeded ? `
     <div class="banner">
       <div class="ic">🛑</div>
-      <div><div class="t">流量已达预设限额，下载服务已自动暂停</div>
-      <div class="d">所有公开下载请求都会被拦截。你可以在「设置」中调高限额，或点击下方按钮重置本月流量。</div></div>
+      <div><div class="t">${esc(t('quotaBannerT'))}</div>
+      <div class="d">${esc(t('quotaBannerD'))}</div></div>
     </div>` : ''}
     <div class="stat-grid">
       <div class="stat-card glass">
-        <div class="label">📡 本月流量</div>
-        <div class="value">${fmtSize(s.traffic.used)}${s.traffic.limit>0?`<small>/ ${fmtSize(s.traffic.limit)}</small>`:'<small>无限</small>'}</div>
+        <div class="label">📡 ${esc(t('statTraffic'))}</div>
+        <div class="value">${fmtSize(s.traffic.used)}${s.traffic.limit>0?`<small>/ ${fmtSize(s.traffic.limit)}</small>`:`<small>${esc(t('unlimitedShort'))}</small>`}</div>
         <div class="progress ${s.traffic.percent>=80?'hot':''}"><i style="width:${s.traffic.limit>0?Math.min(100,s.traffic.percent):3}%"></i></div>
-        <div class="foot">${s.traffic.limit>0?`已用 ${s.traffic.percent}% · 跨月自动重置`:'未设置限额'}</div>
+        <div class="foot">${s.traffic.limit>0?esc(t('usedPercent',{n:s.traffic.percent})):esc(t('noLimit'))}</div>
       </div>
       <div class="stat-card glass">
-        <div class="label">⬇️ 累计下载</div>
+        <div class="label">⬇️ ${esc(t('statDownloads'))}</div>
         <div class="value">${c.downloads_total}</div>
-        <div class="foot">今日 ${c.downloads_today} 次 · ${fmtSize(c.bytes_today)}</div>
+        <div class="foot">${esc(t('todayN',{n:c.downloads_today}))} · ${fmtSize(c.bytes_today)}</div>
       </div>
       <div class="stat-card glass">
-        <div class="label">📁 文件总数</div>
+        <div class="label">📁 ${esc(t('statFiles'))}</div>
         <div class="value">${c.files}</div>
-        <div class="foot">存储于 R2 对象存储</div>
+        <div class="foot">${esc(t('storedR2'))}</div>
       </div>
       <div class="stat-card glass">
-        <div class="label">🔗 分享链接</div>
+        <div class="label">🔗 ${esc(t('statShares'))}</div>
         <div class="value">${c.shares}</div>
-        <div class="foot">有效 ${c.active_shares} 个 · 封禁 IP ${c.banned} 个</div>
+        <div class="foot">${esc(t('sharesFoot',{a:c.active_shares,b:c.banned}))}</div>
       </div>
     </div>
     <div class="glass section">
-      <div class="section-title"><h2>📊 近 14 天下载趋势</h2></div>
+      <div class="section-title"><h2>📊 ${esc(t('chartTitle'))}</h2></div>
       <div class="chart">
         ${s.chart.map(d => `
         <div class="col">
           <div class="bar" style="height:${Math.max(3, Math.round(d.downloads/maxDl*112))}px">
-            <span>${d.downloads} 次 · ${fmtSize(d.bytes)}</span>
+            <span>${d.downloads}${LANG==='zh'?' 次':''} · ${fmtSize(d.bytes)}</span>
           </div>
           <div class="day">${d.day.slice(5).replace('-','/')}</div>
         </div>`).join('')}
       </div>
     </div>
     <div class="glass section">
-      <div class="section-title"><h2>🕘 最近下载</h2>
-        <button class="btn sm" id="goto-logs">查看全部</button></div>
+      <div class="section-title"><h2>🕘 ${esc(t('recentTitle'))}</h2>
+        <button class="btn sm" id="goto-logs">${esc(t('viewAll'))}</button></div>
       ${s.recent.length ? `
       <div style="overflow-x:auto"><table class="tbl">
-        <thead><tr><th>文件</th><th>IP</th><th>浏览器</th><th>系统</th><th>流量</th><th>时间</th></tr></thead>
+        <thead><tr><th>${esc(t('colFile'))}</th><th>${esc(t('colIP'))}</th><th>${esc(t('colBrowser'))}</th><th>${esc(t('colOS'))}</th><th>${esc(t('colTraffic'))}</th><th>${esc(t('colTime'))}</th></tr></thead>
         <tbody>${s.recent.map(r => `
           <tr>
             <td class="name-cell">${ficon(r.file_name)} ${esc(r.file_name)}</td>
@@ -546,7 +732,7 @@ async function loadOverview(){
             <td class="num">${fmtTime(r.created_at)}</td>
           </tr>`).join('')}
         </tbody>
-      </table></div>` : `<div class="empty"><div class="icon">📥</div>还没有下载记录</div>`}
+      </table></div>` : `<div class="empty"><div class="icon">📥</div>${esc(t('noLogsYet'))}</div>`}
     </div>`;
   $('#goto-logs').onclick = () => switchTab('logs');
 }
@@ -557,16 +743,16 @@ async function loadFiles(){
   $('#view').innerHTML = `
     <div class="dropzone" id="dropzone">
       <div class="icon">☁️</div>
-      <div class="t">拖拽文件到此处，或点击上传</div>
-      <div class="d">单文件最大 100 MB（Workers 请求限制）· 直传 R2 对象存储</div>
+      <div class="t">${esc(t('dropTitle'))}</div>
+      <div class="d">${esc(t('dropDesc'))}</div>
       <input type="file" id="file-input" multiple hidden>
     </div>
     <div id="upload-list"></div>
     <div class="glass section">
-      <div class="section-title"><h2>📁 全部文件（${files.length}）</h2></div>
+      <div class="section-title"><h2>📁 ${esc(t('allFiles'))}（${files.length}）</h2></div>
       ${files.length ? `
       <div style="overflow-x:auto"><table class="tbl">
-        <thead><tr><th style="width:44px"></th><th>文件名</th><th>大小</th><th>分享数</th><th>下载量</th><th>上传时间</th><th style="width:170px">操作</th></tr></thead>
+        <thead><tr><th style="width:44px"></th><th>${esc(t('colName'))}</th><th>${esc(t('colSize'))}</th><th>${esc(t('colShareCount'))}</th><th>${esc(t('colDownloads'))}</th><th>${esc(t('colUploaded'))}</th><th style="width:170px">${esc(t('colActions'))}</th></tr></thead>
         <tbody>${files.map(f => `
           <tr>
             <td>${ficon(f.name)}</td>
@@ -576,12 +762,12 @@ async function loadFiles(){
             <td class="num">${f.download_count}</td>
             <td class="num">${fmtTime(f.uploaded_at)}</td>
             <td><div class="actions-cell">
-              <button class="btn sm primary" data-share="${f.id}" ${f.share_count?'':'data-new'}>创建分享</button>
-              <button class="btn sm danger" data-del="${f.id}" data-name="${esc(f.name)}">删除</button>
+              <button class="btn sm primary" data-share="${f.id}">${esc(t('createShare'))}</button>
+              <button class="btn sm danger" data-del="${f.id}" data-name="${esc(f.name)}">${esc(t('del'))}</button>
             </div></td>
           </tr>`).join('')}
         </tbody>
-      </table></div>` : `<div class="empty"><div class="icon">📭</div>还没有文件，上传一个试试</div>`}
+      </table></div>` : `<div class="empty"><div class="icon">📭</div>${esc(t('noFiles'))}</div>`}
     </div>`;
 
   const dz = $('#dropzone'), fi = $('#file-input');
@@ -593,16 +779,16 @@ async function loadFiles(){
 
   $$('[data-share]').forEach(b => b.onclick = () => openShareModal(b.dataset.share));
   $$('[data-del]').forEach(b => b.onclick = async () => {
-    if(!(await confirmDialog('删除文件', `确定删除「${b.dataset.name}」？其所有分享链接和下载记录也会一并删除。`))) return;
+    if(!(await confirmDialog(t('deleteFileT'), t('deleteFileD', {name: b.dataset.name})))) return;
     await api(`/api/admin/files/${b.dataset.del}`, { method:'DELETE' });
-    toast('文件已删除');
+    toast(t('fileDeleted'));
     loadFiles();
   });
 }
 
 function uploadFiles(files){
   for(const file of files){
-    if(file.size > 100 * 1024 * 1024){ toast(`「${file.name}」超过 100 MB 限制`, 'err'); continue; }
+    if(file.size > 100 * 1024 * 1024){ toast(t('tooLarge', {name: file.name}), 'err'); continue; }
     const item = document.createElement('div');
     item.className = 'upload-item glass';
     item.innerHTML = `${ficon(file.name)}<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(file.name)}</span>
@@ -618,10 +804,10 @@ function uploadFiles(files){
       item.querySelector('.pct').textContent = pct + '%';
     };
     xhr.onload = () => {
-      if(xhr.status === 201){ item.querySelector('.pct').textContent = '完成 ✅'; toast(`「${file.name}」上传成功`); loadFiles(); }
-      else { item.querySelector('.pct').textContent = '失败'; toast(`「${file.name}」上传失败`, 'err'); }
+      if(xhr.status === 201){ item.querySelector('.pct').textContent = t('uploadDone'); toast(t('uploadOk', {name: file.name})); loadFiles(); }
+      else { item.querySelector('.pct').textContent = t('uploadFailShort'); toast(t('uploadFail', {name: file.name}), 'err'); }
     };
-    xhr.onerror = () => { item.querySelector('.pct').textContent = '失败'; toast(`「${file.name}」上传失败`, 'err'); };
+    xhr.onerror = () => { item.querySelector('.pct').textContent = t('uploadFailShort'); toast(t('uploadFail', {name: file.name}), 'err'); };
     xhr.send(file);
   }
 }
@@ -629,26 +815,26 @@ function uploadFiles(files){
 /* ═══════════ 创建分享弹窗 ═══════════ */
 function openShareModal(fileId){
   openModal(`
-    <h3>创建分享链接</h3>
-    <div class="sub">生成公开下载链接，可设置有效期与下载次数上限</div>
+    <h3>${esc(t('shareModalTitle'))}</h3>
+    <div class="sub">${esc(t('shareModalSub'))}</div>
     <div class="field">
-      <label>有效期</label>
+      <label>${esc(t('validity'))}</label>
       <select id="sh-exp" style="width:100%;padding:12px 14px;border-radius:14px;font-size:15px;font-family:inherit;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
-        <option value="0" style="color:#111">永久有效</option>
-        <option value="1" style="color:#111">1 小时</option>
-        <option value="24" style="color:#111">1 天</option>
-        <option value="168" style="color:#111">7 天</option>
-        <option value="720" style="color:#111">30 天</option>
+        <option value="0" style="color:#111">${esc(t('perm'))}</option>
+        <option value="1" style="color:#111">${esc(t('h1'))}</option>
+        <option value="24" style="color:#111">${esc(t('d1'))}</option>
+        <option value="168" style="color:#111">${esc(t('d7'))}</option>
+        <option value="720" style="color:#111">${esc(t('d30'))}</option>
       </select>
     </div>
     <div class="field">
-      <label>下载次数上限（留空或 0 = 不限）</label>
-      <input type="number" id="sh-max" min="0" placeholder="不限">
-      <div class="tip">达到上限后链接自动失效。单 IP 重复下载限制由「设置」统一控制。</div>
+      <label>${esc(t('maxDownloadsLabel'))}</label>
+      <input type="number" id="sh-max" min="0" placeholder="${esc(t('unlimitedPlaceholder'))}">
+      <div class="tip">${esc(t('maxTip'))}</div>
     </div>
     <div class="actions">
-      <button class="btn" data-x>取消</button>
-      <button class="btn primary" id="sh-create">生成链接</button>
+      <button class="btn" data-x>${esc(t('cancel'))}</button>
+      <button class="btn primary" id="sh-create">${esc(t('generate'))}</button>
     </div>`);
   $('[data-x]').onclick = closeModal;
   $('#sh-create').onclick = async () => {
@@ -658,15 +844,15 @@ function openShareModal(fileId){
       const r = await api('/api/admin/shares', { method:'POST', body: JSON.stringify({ file_id: fileId, expires_hours: exp, max_downloads: max }) });
       const url = location.origin + r.url;
       openModal(`
-        <h3>分享链接已创建 ✨</h3>
-        <div class="sub">复制下面的链接发给需要的人</div>
+        <h3>${esc(t('shareCreated'))}</h3>
+        <div class="sub">${esc(t('shareCreatedSub'))}</div>
         <div class="link-box">
           <input readonly value="${esc(url)}" id="sh-url" onclick="this.select()">
-          <button class="btn primary" id="sh-copy">复制</button>
+          <button class="btn primary" id="sh-copy">${esc(t('copy'))}</button>
         </div>
         <div class="actions">
-          <button class="btn" data-x>关闭</button>
-          <button class="btn primary" id="sh-open">预览分享页</button>
+          <button class="btn" data-x>${esc(t('close'))}</button>
+          <button class="btn primary" id="sh-open">${esc(t('preview'))}</button>
         </div>`);
       $('#sh-copy').onclick = () => copyText(url);
       $('[data-x]').onclick = closeModal;
@@ -676,39 +862,39 @@ function openShareModal(fileId){
 }
 
 /* ═══════════ 分享 ═══════════ */
-const STATUS_TEXT = { active:['active','有效'], expired:['expired','已过期'], revoked:['revoked','已撤销'], maxed:['maxed','已满额'] };
 async function loadShares(){
   const { shares } = await api('/api/admin/shares');
+  const STATUS_KEY = { active:'stActive', expired:'stExpired', revoked:'stRevoked', maxed:'stMaxed' };
   $('#view').innerHTML = `
     <div class="glass section">
-      <div class="section-title"><h2>🔗 分享链接（${shares.length}）</h2>
-        <button class="btn sm" id="cleanup-shares">清理失效分享</button></div>
+      <div class="section-title"><h2>🔗 ${esc(t('sharesTitle'))}（${shares.length}）</h2>
+        <button class="btn sm" id="cleanup-shares">${esc(t('cleanup'))}</button></div>
       ${shares.length ? `
       <div style="overflow-x:auto"><table class="tbl">
-        <thead><tr><th>文件</th><th>链接</th><th>下载 / 上限</th><th>创建时间</th><th>有效期</th><th>状态</th><th style="width:80px">操作</th></tr></thead>
+        <thead><tr><th>${esc(t('colFile'))}</th><th>${esc(t('colLink'))}</th><th>${esc(t('colDownloads'))} / ${esc(t('colExpires'))}</th><th>${esc(t('colCreated'))}</th><th>${esc(t('colExpires'))}</th><th>${esc(t('colStatus'))}</th><th style="width:80px">${esc(t('colActions'))}</th></tr></thead>
         <tbody>${shares.map(s => `
           <tr>
             <td class="name-cell">${ficon(s.file_name)} ${esc(s.file_name)}</td>
             <td class="mono"><a href="/s/${s.id}" target="_blank" style="color:#a5d8ff;text-decoration:none">/s/${s.id}</a></td>
             <td class="num">${s.download_count} / ${s.max_downloads ?? '∞'}</td>
             <td class="num">${fmtTime(s.created_at)}</td>
-            <td class="num">${s.expires_at ? fmtTime(s.expires_at) : '永久'}</td>
-            <td><span class="tag ${STATUS_TEXT[s.status][0]}"><i></i>${STATUS_TEXT[s.status][1]}</span></td>
-            <td><button class="btn sm danger" data-rv="${s.id}">撤销</button></td>
+            <td class="num">${s.expires_at ? fmtTime(s.expires_at) : esc(t('forever'))}</td>
+            <td><span class="tag ${s.status}"><i></i>${esc(t(STATUS_KEY[s.status]))}</span></td>
+            <td><button class="btn sm danger" data-rv="${s.id}">${esc(t('revoke'))}</button></td>
           </tr>`).join('')}
         </tbody>
-      </table></div>` : `<div class="empty"><div class="icon">🔗</div>还没有分享链接，去「文件」页创建一个</div>`}
+      </table></div>` : `<div class="empty"><div class="icon">🔗</div>${esc(t('noShares'))}</div>`}
     </div>`;
   $('#cleanup-shares').onclick = async () => {
-    if(!(await confirmDialog('清理失效分享', '将删除所有已过期、已撤销、已达下载上限的分享链接。', false))) return;
+    if(!(await confirmDialog(t('confirmCleanupT'), t('confirmCleanupD'), false))) return;
     const r = await api('/api/admin/shares/cleanup', { method:'POST' });
-    toast(`已清理 ${r.deleted} 条失效分享`);
+    toast(t('cleanedN', {n: r.deleted}));
     loadShares();
   };
   $$('[data-rv]').forEach(b => b.onclick = async () => {
-    if(!(await confirmDialog('撤销分享', '撤销后该链接将立即失效，无法恢复。'))) return;
+    if(!(await confirmDialog(t('confirmRevokeT'), t('confirmRevokeD')))) return;
     await api(`/api/admin/shares/${b.dataset.rv}`, { method:'DELETE' });
-    toast('分享已撤销');
+    toast(t('shareRevoked'));
     loadShares();
   });
 }
@@ -719,17 +905,17 @@ async function loadLogs(){
   const d = await api(`/api/admin/logs?page=${logsPage}&per_page=20&q=${q}`);
   $('#view').innerHTML = `
     <div class="glass section">
-      <div class="section-title"><h2>📜 下载记录（共 ${d.total} 条）</h2>
-        <div style="display:flex;gap:8px">
-          <input id="log-q" placeholder="搜索 IP / 文件名…" value="${esc(logsQuery)}"
+      <div class="section-title"><h2>📜 ${esc(t('logsTitle'))}（${esc(t('totalN',{n:d.total}))}）</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="log-q" placeholder="${esc(t('searchPlaceholder'))}" value="${esc(logsQuery)}"
             style="padding:8px 14px;border-radius:12px;font-size:13px;font-family:inherit;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;width:180px">
-          <button class="btn sm" id="clear-30">清理 30 天前</button>
-          <button class="btn sm danger" id="clear-all">清空全部</button>
+          <button class="btn sm" id="clear-30">${esc(t('clear30'))}</button>
+          <button class="btn sm danger" id="clear-all">${esc(t('clearAll'))}</button>
         </div>
       </div>
       ${d.logs.length ? `
       <div style="overflow-x:auto"><table class="tbl">
-        <thead><tr><th>文件</th><th>IP</th><th>国家</th><th>浏览器</th><th>系统</th><th>流量</th><th>时间</th></tr></thead>
+        <thead><tr><th>${esc(t('colFile'))}</th><th>${esc(t('colIP'))}</th><th>${esc(t('colCountry'))}</th><th>${esc(t('colBrowser'))}</th><th>${esc(t('colOS'))}</th><th>${esc(t('colTraffic'))}</th><th>${esc(t('colTime'))}</th></tr></thead>
         <tbody>${d.logs.map(l => `
           <tr>
             <td class="name-cell" title="${esc(l.file_name)}">${ficon(l.file_name)} ${esc(l.file_name)}</td>
@@ -743,24 +929,24 @@ async function loadLogs(){
         </tbody>
       </table></div>
       <div class="pager">
-        <button class="btn sm" id="pg-prev" ${d.page<=1?'disabled':''}>‹ 上一页</button>
-        <span class="info">第 ${d.page} / ${d.pages} 页</span>
-        <button class="btn sm" id="pg-next" ${d.page>=d.pages?'disabled':''}>下一页 ›</button>
-      </div>` : `<div class="empty"><div class="icon">📜</div>${logsQuery ? '没有匹配的记录' : '还没有下载记录'}</div>`}
+        <button class="btn sm" id="pg-prev" ${d.page<=1?'disabled':''}>${esc(t('prev'))}</button>
+        <span class="info">${esc(t('pageOf',{a:d.page,b:d.pages}))}</span>
+        <button class="btn sm" id="pg-next" ${d.page>=d.pages?'disabled':''}>${esc(t('next'))}</button>
+      </div>` : `<div class="empty"><div class="icon">📜</div>${esc(logsQuery ? t('noMatch') : t('noLogs'))}</div>`}
     </div>`;
-  let t;
-  $('#log-q').oninput = e => { clearTimeout(t); t = setTimeout(() => { logsQuery = e.target.value.trim(); logsPage = 1; loadLogs(); }, 350); };
+  let timer;
+  $('#log-q').oninput = e => { clearTimeout(timer); timer = setTimeout(() => { logsQuery = e.target.value.trim(); logsPage = 1; loadLogs(); }, 350); };
   $('#pg-prev').onclick = () => { logsPage--; loadLogs(); };
   $('#pg-next').onclick = () => { logsPage++; loadLogs(); };
   $('#clear-30').onclick = async () => {
-    if(!(await confirmDialog('清理记录', '删除 30 天前的所有下载记录，以减少存储占用。'))) return;
+    if(!(await confirmDialog(t('confirmClear30T'), t('confirmClear30D')))) return;
     const r = await api('/api/admin/logs?mode=older&days=30', { method:'DELETE' });
-    toast(`已清理 ${r.deleted} 条记录`); loadLogs();
+    toast(t('clearedN', {n: r.deleted})); loadLogs();
   };
   $('#clear-all').onclick = async () => {
-    if(!(await confirmDialog('清空全部记录', '将删除所有下载记录（流量统计与分享计数不受影响）。此操作不可恢复。'))) return;
+    if(!(await confirmDialog(t('confirmClearAllT'), t('confirmClearAllD')))) return;
     const r = await api('/api/admin/logs?mode=all', { method:'DELETE' });
-    toast(`已清空 ${r.deleted} 条记录`); loadLogs();
+    toast(t('clearedN', {n: r.deleted})); loadLogs();
   };
 }
 
@@ -769,43 +955,43 @@ async function loadBans(){
   const { bans } = await api('/api/admin/bans');
   $('#view').innerHTML = `
     <div class="glass section" style="margin-bottom:18px">
-      <div class="section-title"><h2>⛔ 手动封禁 IP</h2></div>
+      <div class="section-title"><h2>⛔ ${esc(t('manualBan'))}</h2></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <input id="ban-ip" placeholder="IP 地址，如 1.2.3.4" class="mono"
+        <input id="ban-ip" placeholder="${esc(t('ipPlaceholder'))}" class="mono"
           style="flex:1;min-width:160px;padding:11px 14px;border-radius:14px;font-size:14px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
-        <input id="ban-reason" placeholder="原因（可选）"
+        <input id="ban-reason" placeholder="${esc(t('reasonPlaceholder'))}"
           style="flex:1;min-width:160px;padding:11px 14px;border-radius:14px;font-size:14px;font-family:inherit;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
-        <button class="btn primary" id="ban-add">封禁</button>
+        <button class="btn primary" id="ban-add">${esc(t('ban'))}</button>
       </div>
-      <div class="field" style="margin:12px 0 0"><div class="tip">重复下载超限的 IP 会被系统自动封禁（可在「设置」调整参数），此处可手动补充封禁。</div></div>
+      <div class="field" style="margin:12px 0 0"><div class="tip">${esc(t('banTip'))}</div></div>
     </div>
     <div class="glass section">
-      <div class="section-title"><h2>🚫 封禁名单（${bans.length}）</h2></div>
+      <div class="section-title"><h2>🚫 ${esc(t('banList'))}（${bans.length}）</h2></div>
       ${bans.length ? `
       <div style="overflow-x:auto"><table class="tbl">
-        <thead><tr><th>IP</th><th>原因</th><th>封禁时间</th><th>到期</th><th style="width:80px">操作</th></tr></thead>
+        <thead><tr><th>${esc(t('colIP'))}</th><th>${esc(t('colReason'))}</th><th>${esc(t('colBannedAt'))}</th><th>${esc(t('colUntil'))}</th><th style="width:80px">${esc(t('colActions'))}</th></tr></thead>
         <tbody>${bans.map(b => `
           <tr>
             <td class="mono">${esc(b.ip)}</td>
             <td class="name-cell" title="${esc(b.reason)}">${esc(b.reason || '—')}</td>
             <td class="num">${fmtTime(b.banned_at)}</td>
-            <td class="num">${b.expires_at ? fmtTime(b.expires_at) : '永久'}</td>
-            <td><button class="btn sm" data-unban="${esc(b.ip)}">解封</button></td>
+            <td class="num">${b.expires_at ? fmtTime(b.expires_at) : esc(t('forever'))}</td>
+            <td><button class="btn sm" data-unban="${esc(b.ip)}">${esc(t('unban'))}</button></td>
           </tr>`).join('')}
         </tbody>
-      </table></div>` : `<div class="empty"><div class="icon">✅</div>当前没有封禁任何 IP</div>`}
+      </table></div>` : `<div class="empty"><div class="icon">✅</div>${esc(t('noBans'))}</div>`}
     </div>`;
   $('#ban-add').onclick = async () => {
     const ip = $('#ban-ip').value.trim();
-    if(!ip) return toast('请输入 IP 地址', 'err');
+    if(!ip) return toast(t('enterIp'), 'err');
     try{
       await api('/api/admin/bans', { method:'POST', body: JSON.stringify({ ip, reason: $('#ban-reason').value.trim() || undefined }) });
-      toast(`已封禁 ${ip}`); loadBans();
+      toast(t('bannedIp', {ip})); loadBans();
     }catch(e){ toast(e.message, 'err'); }
   };
   $$('[data-unban]').forEach(b => b.onclick = async () => {
     await api(`/api/admin/bans/${encodeURIComponent(b.dataset.unban)}`, { method:'DELETE' });
-    toast(`已解封 ${b.dataset.unban}`); loadBans();
+    toast(t('unbannedIp', {ip: b.dataset.unban})); loadBans();
   });
 }
 
@@ -815,66 +1001,66 @@ async function loadSettings(){
   $('#view').innerHTML = `
     <div class="glass group">
       <div class="row">
-        <div class="info"><div class="t">站点名称</div><div class="d">显示在分享页和后台标题</div></div>
-        <input type="text" id="st-title" value="${esc(s.site_title)}" style="width:170px;text-align:left">
+        <div class="info"><div class="t">${esc(t('siteName'))}</div><div class="d">${esc(t('siteNameD'))}</div></div>
+        <input type="text" id="st-title" value="${esc(s.site_title)}">
       </div>
     </div>
     <div class="glass group">
       <div class="row">
-        <div class="info"><div class="t">📡 月度流量限额（GB）</div>
-        <div class="d">本月已用 ${fmtSize(s.traffic_used_bytes)}。流量达到限额后，所有下载自动暂停，防止流量超额产生费用。设为 0 表示不限制，每月自动重置。</div></div>
+        <div class="info"><div class="t">📡 ${esc(t('trafficLimit'))}</div>
+        <div class="d">${esc(t('trafficLimitD',{used:fmtSize(s.traffic_used_bytes)}))}</div></div>
         <input type="number" id="st-limit" min="0" step="0.1" value="${s.traffic_limit_gb}">
       </div>
       <div class="row">
-        <div class="info"><div class="t">♻️ 重置本月流量</div><div class="d">将已用流量清零，立即恢复下载服务</div></div>
-        <button class="btn sm" id="st-reset-traffic">重置</button>
+        <div class="info"><div class="t">♻️ ${esc(t('resetTraffic'))}</div><div class="d">${esc(t('resetTrafficD'))}</div></div>
+        <button class="btn sm" id="st-reset-traffic">${esc(t('reset'))}</button>
       </div>
     </div>
     <div class="glass group">
       <div class="row">
-        <div class="info"><div class="t">🔁 单 IP 最大下载次数</div>
-        <div class="d">同一 IP 在统计窗口内对同一资源最多可下载的次数，超出后拦截。设为 0 表示不限制。</div></div>
+        <div class="info"><div class="t">🔁 ${esc(t('perIp'))}</div>
+        <div class="d">${esc(t('perIpD'))}</div></div>
         <input type="number" id="st-perip" min="0" value="${s.max_downloads_per_ip}">
       </div>
       <div class="row">
-        <div class="info"><div class="t">⏱️ 统计窗口（小时）</div><div class="d">统计单 IP 重复下载的时间范围。设为 0 表示永久累计。</div></div>
+        <div class="info"><div class="t">⏱️ ${esc(t('window'))}</div><div class="d">${esc(t('windowD'))}</div></div>
         <input type="number" id="st-window" min="0" value="${s.count_window_hours}">
       </div>
       <div class="row">
-        <div class="info"><div class="t">🚫 超限自动封禁</div><div class="d">开启后，重复下载超限的 IP 会被自动加入封禁名单</div></div>
+        <div class="info"><div class="t">🚫 ${esc(t('autoBan'))}</div><div class="d">${esc(t('autoBanD'))}</div></div>
         <label class="switch"><input type="checkbox" id="st-autoban" ${s.auto_ban?'checked':''}><span class="track"><span class="thumb"></span></span></label>
       </div>
       <div class="row">
-        <div class="info"><div class="t">⏳ 封禁时长（小时）</div><div class="d">自动封禁的持续时间，到期自动解封。设为 0 表示永久封禁直至手动解封。</div></div>
+        <div class="info"><div class="t">⏳ ${esc(t('banHours'))}</div><div class="d">${esc(t('banHoursD'))}</div></div>
         <input type="number" id="st-banhours" min="0" value="${s.ban_hours}">
       </div>
     </div>
     <div class="glass group">
       <div class="row">
-        <div class="info"><div class="t">🧹 清除下载记录</div><div class="d">删除下载明细以减少 D1 存储占用（流量统计与分享下载计数不受影响）</div></div>
+        <div class="info"><div class="t">🧹 ${esc(t('clearLogs'))}</div><div class="d">${esc(t('clearLogsD'))}</div></div>
         <div style="display:flex;gap:8px">
-          <button class="btn sm" id="st-clear-30">清理 30 天前</button>
-          <button class="btn sm danger" id="st-clear-all">清空全部</button>
+          <button class="btn sm" id="st-clear-30">${esc(t('clear30'))}</button>
+          <button class="btn sm danger" id="st-clear-all">${esc(t('clearAll'))}</button>
         </div>
       </div>
     </div>
-    <button class="btn primary" id="st-save" style="padding:14px 28px;font-size:15px;border-radius:18px">保存设置</button>`;
+    <button class="btn primary" id="st-save" style="padding:14px 28px;font-size:15px;border-radius:18px">${esc(t('save'))}</button>`;
 
   $('#st-reset-traffic').onclick = async () => {
-    if(!(await confirmDialog('重置流量', '将本月已用流量清零并立即恢复下载服务？', false))) return;
+    if(!(await confirmDialog(t('confirmResetT'), t('confirmResetD'), false))) return;
     await api('/api/admin/traffic/reset', { method:'POST' });
-    toast('本月流量已重置');
+    toast(t('trafficResetOk'));
     loadSettings();
   };
   $('#st-clear-30').onclick = async () => {
-    if(!(await confirmDialog('清理记录', '删除 30 天前的所有下载记录？'))) return;
+    if(!(await confirmDialog(t('confirmClear30T'), t('confirmClear30D')))) return;
     const r = await api('/api/admin/logs?mode=older&days=30', { method:'DELETE' });
-    toast(`已清理 ${r.deleted} 条记录`);
+    toast(t('clearedN', {n: r.deleted}));
   };
   $('#st-clear-all').onclick = async () => {
-    if(!(await confirmDialog('清空全部记录', '删除所有下载记录？此操作不可恢复。'))) return;
+    if(!(await confirmDialog(t('confirmClearAllT'), t('confirmClearAllD')))) return;
     const r = await api('/api/admin/logs?mode=all', { method:'DELETE' });
-    toast(`已清空 ${r.deleted} 条记录`);
+    toast(t('clearedN', {n: r.deleted}));
   };
   $('#st-save').onclick = async () => {
     const body = {
@@ -886,7 +1072,7 @@ async function loadSettings(){
       ban_hours: Number($('#st-banhours').value) || 0,
     };
     await api('/api/admin/settings', { method:'PUT', body: JSON.stringify(body) });
-    toast('设置已保存');
+    toast(t('saved'));
     loadSettings();
   };
 }

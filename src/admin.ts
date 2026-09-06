@@ -2,12 +2,16 @@ import type { Env } from "./types";
 import { ensureSchema, randomId } from "./db";
 import { getSettings, updateSettings } from "./settings";
 import { checkAdminKey, createSession, verifySession, clientIp, rateLimitLogin } from "./auth";
+import { pickLang } from "./i18n";
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json;charset=utf-8", "cache-control": "no-store" },
   });
+
+/** API 错误消息跟随请求语言（浏览器 fetch 自动携带 Accept-Language） */
+const msg = (req: Request, zh: string, en: string) => (pickLang(req) === "zh" ? zh : en);
 
 /** 安全解析 JSON body（失败返回空对象） */
 async function readJson<T>(req: Request): Promise<Partial<T>> {
@@ -49,12 +53,13 @@ export async function handleAdminApi(
   // ── 登录（无需会话） ──────────────────────────────
   if (path === "/api/admin/login" && method === "POST") {
     const ip = clientIp(req);
-    if (!rateLimitLogin(ip)) return json({ error: "尝试过于频繁，请稍后再试" }, 429);
+    if (!rateLimitLogin(ip))
+      return json({ error: msg(req, "尝试过于频繁，请稍后再试", "Too many attempts. Please try again later.") }, 429);
     if (!env.ADMIN_KEY)
-      return json({ error: "未设置 ADMIN_KEY 密钥，请先执行 npx wrangler secret put ADMIN_KEY" }, 500);
+      return json({ error: msg(req, "未设置 ADMIN_KEY 密钥，请先执行 npx wrangler secret put ADMIN_KEY", "ADMIN_KEY is not set. Run: npx wrangler secret put ADMIN_KEY") }, 500);
     const body = await readJson<{ key: string }>(req);
     if (!body.key || !(await checkAdminKey(env, body.key))) {
-      return json({ error: "管理密钥错误" }, 401);
+      return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
     }
     return new Response(JSON.stringify({ ok: true }), {
       headers: {
@@ -165,14 +170,14 @@ export async function handleAdminApi(
   // ── 上传文件（原始流式 body，文件名放 X-File-Name 头） ──
   if (path === "/api/admin/upload" && method === "POST") {
     const rawName = req.headers.get("x-file-name");
-    if (!rawName) return json({ error: "缺少 X-File-Name 头" }, 400);
+    if (!rawName) return json({ error: msg(req, "缺少 X-File-Name 头", "Missing X-File-Name header") }, 400);
     let name: string;
     try {
       name = sanitizeName(decodeURIComponent(rawName));
     } catch {
       name = sanitizeName(rawName);
     }
-    if (!req.body) return json({ error: "请求体为空" }, 400);
+    if (!req.body) return json({ error: msg(req, "请求体为空", "Empty request body") }, 400);
     const id = randomId(14);
     const key = `files/${id}`;
     const mime = req.headers.get("content-type") || "application/octet-stream";
@@ -192,7 +197,7 @@ export async function handleAdminApi(
   if (fileMatch && method === "DELETE") {
     const fileId = fileMatch[1];
     const file = await env.DB.prepare("SELECT key FROM files WHERE id = ?1").bind(fileId).first<{ key: string }>();
-    if (!file) return json({ error: "文件不存在" }, 404);
+    if (!file) return json({ error: msg(req, "文件不存在", "File not found") }, 404);
     await env.DB.batch([
       env.DB.prepare("DELETE FROM shares WHERE file_id = ?1").bind(fileId),
       env.DB.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(fileId),
@@ -205,9 +210,9 @@ export async function handleAdminApi(
   // ── 创建分享 ──────────────────────────────────────
   if (path === "/api/admin/shares" && method === "POST") {
     const body = await readJson<{ file_id: string; expires_hours: number | null; max_downloads: number | null }>(req);
-    if (!body.file_id) return json({ error: "缺少 file_id" }, 400);
+    if (!body.file_id) return json({ error: msg(req, "缺少 file_id", "Missing file_id") }, 400);
     const file = await env.DB.prepare("SELECT id FROM files WHERE id = ?1").bind(body.file_id).first();
-    if (!file) return json({ error: "文件不存在" }, 404);
+    if (!file) return json({ error: msg(req, "文件不存在", "File not found") }, 404);
     const expiresAt =
       body.expires_hours && body.expires_hours > 0 ? Date.now() + body.expires_hours * 3600_000 : null;
     const maxDownloads =
@@ -258,7 +263,7 @@ export async function handleAdminApi(
   const shareMatch = /^\/api\/admin\/shares\/([^/]+)$/.exec(path);
   if (shareMatch && method === "DELETE") {
     const r = await env.DB.prepare("DELETE FROM shares WHERE id = ?1").bind(shareMatch[1]).run();
-    if ((r.meta.changes ?? 0) === 0) return json({ error: "分享不存在" }, 404);
+    if ((r.meta.changes ?? 0) === 0) return json({ error: msg(req, "分享不存在", "Share not found") }, 404);
     return json({ ok: true });
   }
 
@@ -322,7 +327,7 @@ export async function handleAdminApi(
   if (path === "/api/admin/bans" && method === "POST") {
     const body = await readJson<{ ip: string; reason: string; hours: number | null }>(req);
     const ip = body.ip?.trim();
-    if (!ip || !/^[0-9a-fA-F:.]{3,45}$/.test(ip)) return json({ error: "IP 格式无效" }, 400);
+    if (!ip || !/^[0-9a-fA-F:.]{3,45}$/.test(ip)) return json({ error: msg(req, "IP 格式无效", "Invalid IP format") }, 400);
     const expiresAt = body.hours && body.hours > 0 ? Date.now() + body.hours * 3600_000 : null;
     await env.DB.prepare(
       `INSERT INTO banned_ips(ip, reason, banned_at, expires_at) VALUES(?1, ?2, ?3, ?4)

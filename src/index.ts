@@ -10,7 +10,12 @@ export default {
       return await route(req, env, ctx);
     } catch (err) {
       console.error("unhandled error:", err);
-      return errorPage(500, "服务出错了", "服务器内部错误，请稍后重试。");
+      return errorPage(
+        req,
+        500,
+        { zh: "服务出错了", en: "Something Went Wrong" },
+        { zh: "服务器内部错误，请稍后重试。", en: "An internal server error occurred. Please try again later." }
+      );
     }
   },
 };
@@ -55,8 +60,17 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
       }
       return handleDownload(req, env, ctx, token);
     }
-    return errorPage(404, "页面不存在", "请求的地址无效。");
+    return notFound(req);
   }
 
-  return errorPage(404, "页面不存在", "请求的地址无效。");
+  return notFound(req);
+}
+
+function notFound(req: Request): Response {
+  return errorPage(
+    req,
+    404,
+    { zh: "页面不存在", en: "Not Found" },
+    { zh: "请求的地址无效。", en: "The requested address is invalid." }
+  );
 }
