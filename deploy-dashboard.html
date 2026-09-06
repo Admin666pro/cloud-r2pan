@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crystal Drive · Cloudflare 控制台图形化部署</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Helvetica Neue","Microsoft YaHei",sans-serif;
+  min-height:100vh; color:#eef2ff; padding:40px 16px 80px;
+  background:linear-gradient(160deg,#0b1026 0%,#1a1240 45%,#2a1045 100%);
+  -webkit-tap-highlight-color:transparent;
+}
+.wrap{ max-width:760px; margin:0 auto; }
+header{ text-align:center; margin-bottom:34px; }
+.logo{
+  width:64px;height:64px;margin:0 auto 16px;border-radius:18px;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(145deg,rgba(255,255,255,.28),rgba(255,255,255,.08));
+  border:1px solid rgba(255,255,255,.32);box-shadow:inset 0 2px 0 rgba(255,255,255,.4),0 14px 34px rgba(0,0,0,.35);
+}
+h1{ font-size:25px;font-weight:800;letter-spacing:-.02em; }
+.sub{ margin-top:8px;font-size:14px;color:rgba(255,255,255,.68);line-height:1.7; }
+.tag{ margin-top:16px;font-size:12px;color:#a5d8ff;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.35);
+  display:inline-block;padding:6px 14px;border-radius:999px;letter-spacing:.02em; }
+.notice{
+  display:flex;gap:10px;align-items:flex-start;margin:18px 0 6px;padding:14px 16px;border-radius:16px;
+  background:rgba(255,159,10,.1);border:1px solid rgba(255,159,10,.32);font-size:13px;line-height:1.65;color:#ffd9a0;
+}
+.notice b{ color:#ffc46b; }
+
+/* 流程容器 */
+.flow{ position:relative; padding-top:8px; }
+.line{ position:absolute; left:27px; top:46px; bottom:46px; width:2px;
+  background:linear-gradient(180deg,rgba(56,189,248,.0),rgba(56,189,248,.5) 12%,#8b5cf6 88%,rgba(139,92,246,0)); }
+
+.step{ position:relative; display:flex; gap:18px; margin-bottom:26px; }
+.node{
+  flex:0 0 56px; width:56px; height:56px; border-radius:18px; z-index:1;
+  display:flex; align-items:center; justify-content:center; font-size:24px; font-weight:800;
+  background:linear-gradient(145deg,#3d9bff,#0a7cff); color:#fff;
+  box-shadow:0 10px 24px rgba(10,124,255,.35),inset 0 1px 0 rgba(255,255,255,.4);
+}
+.card{
+  flex:1; background:linear-gradient(145deg,rgba(255,255,255,.10),rgba(255,255,255,.05));
+  backdrop-filter:blur(18px) saturate(160%); -webkit-backdrop-filter:blur(18px) saturate(160%);
+  border:1px solid rgba(255,255,255,.20); border-radius:20px; padding:18px 20px;
+  box-shadow:0 16px 40px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.18);
+}
+.card h3{ font-size:16px; font-weight:700; display:flex; align-items:center; gap:8px; }
+.card h3 .hint{ font-size:11px; color:rgba(255,255,255,.5); font-weight:500; margin-left:auto; }
+.card p{ margin-top:8px; font-size:13.5px; line-height:1.75; color:rgba(255,255,255,.82); }
+.card p b{ color:#fff; }
+.card .go{ margin-top:10px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:12px; background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.12);
+  border-radius:10px; padding:9px 12px; color:#7dd3fc; word-break:break-all; }
+.card .target{ margin-top:10px; font-size:12.5px; color:#a5d8ff; background:rgba(56,189,248,.1);
+  border:1px solid rgba(56,189,248,.25); border-radius:10px; padding:9px 12px; }
+ul{ margin:10px 0 0 0; padding-left:18px; } ul li{ font-size:13px; line-height:1.8; color:rgba(255,255,255,.8); }
+.warnbox{ margin-top:10px; font-size:12.5px; color:#fca5a5; background:rgba(244,63,94,.1);
+  border:1px solid rgba(244,63,94,.28); border-radius:10px; padding:9px 12px; line-height:1.6; }
+
+/* 分支卡片（代码接入两项） */
+.opt{ margin-top:10px; display:grid; gap:10px; }
+.opt > div{ border:1px dashed rgba(255,255,255,.25); border-radius:12px; padding:11px 13px; font-size:13px; line-height:1.7; color:rgba(255,255,255,.85); }
+.opt b{ color:#fff; }
+
+/* 结尾 CTA */
+.ending{ text-align:center; margin-top:14px; padding:24px; border-radius:22px;
+  background:linear-gradient(145deg,rgba(95,224,150,.16),rgba(56,189,248,.10));
+  border:1px solid rgba(95,224,150,.4); }
+.ending b{ font-size:15px; }
+.ending .url{ margin-top:10px; font-family:ui-monospace,monospace; font-size:13px; color:#7ce7a3; word-break:break-all; }
+.keeplink{ text-align:center; margin-top:22px; font-size:12.5px; color:rgba(255,255,255,.55); }
+.keeplink a{ color:#a5d8ff; text-decoration:none; }
+.keeplink a:hover{ text-decoration:underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><svg viewBox="0 0 24 24" width="34" height="34" fill="none"><path d="M12 2L21 8.5V15.5L12 22L3 15.5V8.5L12 2Z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round" fill="rgba(255,255,255,.14)"/><path d="M12 2V22M3 8.5L12 15L21 8.5M3 15.5L12 9L21 15.5" stroke="#fff" stroke-width="1.2" opacity=".65"/></svg></div>
+    <h1>Crystal Drive · Cloudflare 图形化部署</h1>
+    <div class="sub">全程在 <b>dash.cloudflare.com</b> 浏览器控制台完成，无需命令行。<br>只需创建资源 → 接入代码 → 绑定 → 填密钥，4 步上线。</div>
+    <div class="tag">绑定：BUCKET(R2) · DB(D1) · ADMIN_KEY(Secret) · Worker: crystal-drive</div>
+  </header>
+
+  <div class="notice"><div>📌</div><div><b>说明：</b>本页是「控制台图形化（GUI）」流程，适合在线操作与新人上手。
+  命令行 CLI / GitHub Actions 的自动化流程 <b>已保留在项目 README 中</b>，未做改动，本页只是多提供一条可视化路径。</div></div>
+
+  <div class="flow">
+    <div class="line"></div>
+
+    <!-- 1 -->
+    <div class="step">
+      <div class="node">1</div>
+      <div class="card">
+        <h3>🌐 登录 Cloudflare 控制台</h3>
+        <p>打开 <b>dash.cloudflare.com</b> 并登录你的账户。首次使用需先完成账户注册与邮箱验证。</p>
+        <div class="target">访问 https://dash.cloudflare.com</div>
+      </div>
+    </div>
+
+    <!-- 2 -->
+    <div class="step">
+      <div class="node">2</div>
+      <div class="card">
+        <h3>🗄️ 创建 D1 数据库 <span class="hint">数据表</span></h3>
+        <p>左侧栏进入 <b>Workers &amp; Pages</b> → 找到 <b>D1</b>，点击 <b>Create database</b>。</p>
+        <ul>
+          <li>数据库名称：<b>crystal-drive</b></li>
+          <li>创建后点进数据库，<b>复制显示的 <code>database_id</code></b>，稍后用</li>
+        </ul>
+        <div class="go">绑定名 DB · 资源名 crystal-drive · database_id xxxxxxxx-…</div>
+        <div class="tip" style="margin-top:8px;font-size:12.5px;color:rgba(255,255,255,.6)">建表(info/shares 等)由代码首次请求自动完成，控制台无需手动建表。</div>
+      </div>
+    </div>
+
+    <!-- 3 -->
+    <div class="step">
+      <div class="node">3</div>
+      <div class="card">
+        <h3>📦 创建 R2 存储桶 <span class="hint">文件存储</span></h3>
+        <p>左侧栏进入 <b>R2 Object Storage</b> → 点击 <b>Create bucket</b>。</p>
+        <ul>
+          <li>桶名称：<b>crystal-drive</b>（与 D1 同名即可，二者互不影响）</li>
+          <li>区域保留默认 <b>Automatic</b>，创建完成</li>
+        </ul>
+        <div class="go">绑定名 BUCKET · 桶名 crystal-drive</div>
+      </div>
+    </div>
+
+    <!-- 4 -->
+    <div class="step">
+      <div class="node">4</div>
+      <div class="card">
+        <h3>⚙️ 创建 Worker <span class="hint">运行代码</span></h3>
+        <p>进入 <b>Workers &amp; Pages</b> → 点 <b>Create</b> → 选择 <b>Create Worker</b>。</p>
+        <ul>
+          <li>Worker 名称：<b>crystal-drive</b></li>
+          <li>先点 <b>Deploy</b> 建立空 Worker（代码下一步接入）</li>
+        </ul>
+        <div class="go">Worker 名称 crystal-drive · 入口 src/index.ts</div>
+      </div>
+    </div>
+
+    <!-- 5 -->
+    <div class="step">
+      <div class="node">5</div>
+      <div class="card">
+        <h3>🔧 接入项目代码 <span class="hint">最重要的一步</span></h3>
+        <p>本项目为 <b>TypeScript 多文件</b>（含 HTML 文本模块），控制台在线编辑器无法直接编译，需按下列方式之一接入代码：</p>
+        <div class="opt">
+          <div><b>方式 A · Git 集成（推荐）</b>：在 Create 时选「<b>Upload via Git / 连接到 GitHub</b>」，选择仓库 Admin666pro/cloud-r2pan，Cloudflare 会根据 <code>wrangler.jsonc</code> 自动构建并部署。</div>
+          <div><b>方式 B · 本地编译后上传</b>：在本机 <code>npm install</code> 后执行 <code>npx wrangler deploy</code>，代码已上传到该 Worker（本页仅展示控制台图形入口）。</div>
+        </div>
+        <div class="warnbox">⚠️ 无论哪种方式，都需要先把 <code>database_id</code> 填进 wrangler.jsonc（占位符 LOCAL_PLACEHOLDER），否则部署会失败。</div>
+      </div>
+    </div>
+
+    <!-- 6 -->
+    <div class="step">
+      <div class="node">6</div>
+      <div class="card">
+        <h3>🔗 绑定 D1 与 R2 <span class="hint">Binding</span></h3>
+        <p>进入 Worker <b>crystal-drive → Settings → Bindings → Add</b>：</p>
+        <ul>
+          <li>Add <b>D1 Database</b>：变量名 <code>DB</code>，选择数据库 <code>crystal-drive</code></li>
+          <li>Add <b>R2 Bucket</b>：变量名 <code>BUCKET</code>，选择桶 <code>crystal-drive</code></li>
+        </ul>
+        <div class="go">DB → crystal-drive（D1）｜BUCKET → crystal-drive（R2）</div>
+      </div>
+    </div>
+
+    <!-- 7 -->
+    <div class="step">
+      <div class="node">7</div>
+      <div class="card">
+        <h3>🔐 设置管理密钥 ADMIN_KEY <span class="hint">Variable / Secret</span></h3>
+        <p>进入 <b>Settings → Variables and Secrets → Add</b>，类型选 <b>Secret</b>：</p>
+        <ul>
+          <li>变量名：<b>ADMIN_KEY</b></li>
+          <li>值：自定义的一串登录密钥（勿与代码库中的开发密钥相同）</li>
+        </ul>
+        <div class="go">ADMIN_KEY（Secret）</div>
+        <div class="warnbox">⚠️ 该密钥即管理后台登录口令，请妥善保管；对应本地开发使用的 .dev.vars 里的 ADMIN_KEY。</div>
+      </div>
+    </div>
+
+    <!-- 8 -->
+    <div class="step">
+      <div class="node">8</div>
+      <div class="card">
+        <h3>🚀 部署完成，开始使用</h3>
+        <p>返回 Workers 列表，打开 <b>crystal-drive</b>，访问管理后台：</p>
+        <div class="target">https://crystal-drive.&lt;你的账户&gt;.workers.dev/admin</div>
+        <p style="margin-top:6px">用 <code>ADMIN_KEY</code> 登录，即可上传文件并生成分享链接。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="ending">
+    <b>✅ 部署完成</b>
+    <div class="url">https://crystal-drive.&lt;你的账户&gt;.workers.dev/admin</div>
+  </div>
+
+  <div class="keeplink">原始部署文档（CLI 手动部署 + GitHub Actions 工作流）仍保留在
+    <a href="README.md" target="_blank">README.md</a>，与本页互不冲突。</div>
+</div>
+</body>
+</html>
