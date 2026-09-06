@@ -20,7 +20,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  siteTitle: "Crystal Drive",
+  siteTitle: "cloud-r2pan",
   trafficLimitBytes: 10 * 1024 ** 3, // 10 GB
   trafficUsedBytes: 0,
   trafficMonth: "",

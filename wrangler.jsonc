@@ -1,20 +1,20 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "crystal-drive",
+  "name": "cloud-r2pan",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-01",
 
   // ── 绑定 ──────────────────────────────────────────────
   // 部署前请执行:
-  //   npx wrangler r2 bucket create crystal-drive
-  //   npx wrangler d1 create crystal-drive
+  //   npx wrangler r2 bucket create cloud-r2pan
+  //   npx wrangler d1 create cloud-r2pan
   // 并把返回的 database_id 填到下方, 然后设置管理密钥:
   //   npx wrangler secret put admin
   "r2_buckets": [
-    { "binding": "r2", "bucket_name": "crystal-drive" }
+    { "binding": "r2", "bucket_name": "cloud-r2pan" }
   ],
   "d1_databases": [
-    { "binding": "db", "database_name": "crystal-drive", "database_id": "LOCAL_PLACEHOLDER" }
+    { "binding": "db", "database_name": "cloud-r2pan", "database_id": "LOCAL_PLACEHOLDER" }
   ],
 
   // 将 public/*.html 作为文本模块导入

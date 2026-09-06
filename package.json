@@ -1,8 +1,8 @@
 {
-  "name": "crystal-drive",
+  "name": "cloud-r2pan",
   "version": "1.0.0",
   "private": true,
-  "description": "Crystal Drive - iOS 26 液态玻璃风格网盘分享系统 (Cloudflare Workers + R2 + D1)",
+  "description": "cloud-r2pan - iOS 26 液态玻璃风格网盘分享系统 (Cloudflare Workers + R2 + D1)",
   "scripts": {
     "dev": "wrangler dev",
     "build": "tsc --noEmit && wrangler deploy --dry-run --outdir=dist",
