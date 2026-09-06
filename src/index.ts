@@ -1,7 +1,7 @@
 import type { Env } from "./types";
 import { ensureSchema } from "./db";
 import { handleAdminApi } from "./admin";
-import { handleDownload, handleShareInfo } from "./public";
+import { handleDownload, handleShareInfo, handleVerify } from "./public";
 import { serveAdminPage, serveSharePage, errorPage } from "./pages";
 
 export default {
@@ -53,6 +53,12 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     }
     if (sub === "/info") {
       return handleShareInfo(req, env, token);
+    }
+    if (sub === "/verify") {
+      if (req.method !== "POST") {
+        return new Response("Method Not Allowed", { status: 405 });
+      }
+      return handleVerify(req, env, token);
     }
     if (sub === "/download") {
       if (req.method !== "GET" && req.method !== "HEAD") {

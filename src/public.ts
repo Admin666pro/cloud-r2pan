@@ -24,6 +24,69 @@ function parseRange(header: string | null, size: number): { offset: number; leng
   return { offset, length };
 }
 
+/* ═══════════ 分享密码 & 下载授权令牌 ═══════════
+ * 密码存储为加盐 SHA-256（salt:sha256(salt:password)）；下载授权用 HMAC 签名携带过期时间，
+ * 避免把明文密码拼进下载 URL。HMAC 密钥复用 ADMIN_KEY，无需新增 Secret，密钥轮换时短时令牌即失效。
+ */
+/** 加盐与密码哈希串（salt:hashhex） */
+export async function hashPassword(password: string): Promise<string> {
+  const salt = randomHex();
+  return salt + ":" + await sha256Hex(salt + ":" + password);
+}
+/** 常数时间校验密码 */
+async function verifyPassword(stored: string, password: string): Promise<boolean> {
+  const i = stored.indexOf(":");
+  if (i < 0) return false;
+  const salt = stored.slice(0, i);
+  const want = stored.slice(i + 1);
+  const got = await sha256Hex(salt + ":" + password);
+  return safeEqual(want, got);
+}
+/** 颁发短时下载授权令牌：格式 `${到期时间戳}.${HMAC}` */
+async function issueToken(env: Env, token: string): Promise<string> {
+  const exp = Date.now() + TOKEN_TTL_MS;
+  const sig = await hmac(env, `${token}:${exp}`);
+  return `${exp}.${sig}`;
+}
+/** 校验下载授权令牌（存在于 URL query string 中） */
+async function verifyShareToken(env: Env, token: string, query: string): Promise<boolean> {
+  const t = new URLSearchParams(query).get("t");
+  if (!t) return false;
+  const i = t.indexOf(".");
+  if (i < 0) return false;
+  const exp = Number(t.slice(0, i));
+  if (!Number.isFinite(exp) || exp < Date.now()) return false;
+  const want = await hmac(env, `${token}:${exp}`);
+  return safeEqual(t.slice(i + 1), want);
+}
+
+const TOKEN_TTL_MS = 24 * 3600_000; // 授权令牌有效期 24h
+function randomHex(n = 16): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(n));
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function sha256Hex(data: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function hmac(env: Env, msg: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(env.ADMIN_KEY),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let k = 0; k < a.length; k++) diff |= a.charCodeAt(k) ^ b.charCodeAt(k);
+  return diff === 0;
+}
+
 /** GET /s/:token —— 分享页元信息（供前端渲染） */
 export async function handleShareInfo(req: Request, env: Env, token: string): Promise<Response> {
   const row = await getShare(env, token);
@@ -44,6 +107,7 @@ export async function handleShareInfo(req: Request, env: Env, token: string): Pr
     created_at: row.created_at,
     expires_at: row.expires_at,
     max_downloads: row.max_downloads,
+    needs_password: !!row.password_hash,
     quota_exceeded: quotaExceeded,
     site_title: settings.siteTitle,
   });
@@ -51,13 +115,29 @@ export async function handleShareInfo(req: Request, env: Env, token: string): Pr
 
 async function getShare(env: Env, token: string): Promise<ShareWithFile | null> {
   return await env.DB.prepare(
-    `SELECT s.id, s.file_id, s.created_at, s.expires_at, s.max_downloads, s.download_count, s.revoked,
+    `SELECT s.id, s.file_id, s.created_at, s.expires_at, s.max_downloads, s.download_count, s.revoked, s.password_hash,
             f.key, f.name, f.size, f.mime
      FROM shares s JOIN files f ON f.id = s.file_id
      WHERE s.id = ?1`
   )
     .bind(token)
     .first<ShareWithFile>();
+}
+
+/** POST /s/:token/verify —— 校验分享密码，成功后颁发短时下载授权令牌 */
+export async function handleVerify(req: Request, env: Env, token: string): Promise<Response> {
+  if (req.method !== "POST") return Response.json({ error: "method_not_allowed" }, { status: 405 });
+  const row = await getShare(env, token);
+  if (!row) return Response.json({ error: "not_found" }, { status: 404 });
+  if (!row.password_hash) return Response.json({ ok: true, url: `/s/${token}/download` });
+  let body: { password?: string } = {};
+  try {
+    body = await req.json();
+  } catch {}
+  if (!(await verifyPassword(row.password_hash, String(body.password ?? ""))))
+    return Response.json({ error: "bad_password" }, { status: 401 });
+  const ticket = await issueToken(env, token);
+  return Response.json({ ok: true, url: `/s/${token}/download?t=${ticket}` });
 }
 
 /** GET /s/:token/download —— 下载主流程：封禁检查 → 有效性检查 → 流量限额 → 重复下载封禁 → 流式输出 */
@@ -126,6 +206,16 @@ export async function handleDownload(
         en: `This resource allows ${row.max_downloads} downloads and the quota is used up.`,
       }
     );
+
+  // 2.5 密码校验：需先解锁（POST /s/:token/verify 获取授权令牌）
+  if (row.password_hash && !(await verifyShareToken(env, token, new URL(req.url).search))) {
+    return errorPage(
+      req,
+      403,
+      { zh: "需要访问密码", en: "Password Required" },
+      { zh: "该分享受密码保护，请输入访问密码后再下载。", en: "This share is password-protected. Enter the access password to download." }
+    );
+  }
 
   const settings = await getSettings(env);
 

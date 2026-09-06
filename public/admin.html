@@ -349,6 +349,8 @@ const I18N = {
     // 分享弹窗
     shareModalTitle: '创建分享链接', shareModalSub: '生成公开下载链接，可设置有效期与下载次数上限',
     validity: '有效期', perm: '永久有效', h1: '1 小时', d1: '1 天', d7: '7 天', d30: '30 天',
+    sharePassword: '访问密码（可选）', sharePasswordPh: '留空则无需密码',
+    sharePasswordHint: '设置后，访客需输入密码才能下载。',
     maxDownloadsLabel: '下载次数上限（留空或 0 = 不限）', unlimitedPlaceholder: '不限',
     maxTip: '达到上限后链接自动失效。单 IP 重复下载限制由「设置」统一控制。',
     generate: '生成链接', shareCreated: '分享链接已创建 ✨', shareCreatedSub: '复制下面的链接发给需要的人',
@@ -423,6 +425,8 @@ const I18N = {
     // 分享弹窗
     shareModalTitle: 'Create Share Link', shareModalSub: 'Generate a public download link with optional expiry and download cap',
     validity: 'Validity', perm: 'Forever', h1: '1 hour', d1: '1 day', d7: '7 days', d30: '30 days',
+    sharePassword: 'Access password (optional)', sharePasswordPh: 'Leave blank for no password',
+    sharePasswordHint: 'When set, visitors must enter a password to download.',
     maxDownloadsLabel: 'Max downloads (empty or 0 = unlimited)', unlimitedPlaceholder: 'Unlimited',
     maxTip: 'The link expires when the cap is reached. Per-IP duplicate limits are controlled in Settings.',
     generate: 'Generate Link', shareCreated: 'Share link created ✨', shareCreatedSub: 'Copy the link below and share it',
@@ -828,6 +832,11 @@ function openShareModal(fileId){
       </select>
     </div>
     <div class="field">
+      <label>${esc(t('sharePassword'))}</label>
+      <input type="text" id="sh-pwd" placeholder="${esc(t('sharePasswordPh'))}" autocomplete="off">
+      <div class="tip">${esc(t('sharePasswordHint'))}</div>
+    </div>
+    <div class="field">
       <label>${esc(t('maxDownloadsLabel'))}</label>
       <input type="number" id="sh-max" min="0" placeholder="${esc(t('unlimitedPlaceholder'))}">
       <div class="tip">${esc(t('maxTip'))}</div>
@@ -840,8 +849,9 @@ function openShareModal(fileId){
   $('#sh-create').onclick = async () => {
     const exp = Number($('#sh-exp').value) || null;
     const max = Number($('#sh-max').value) || null;
+    const password = $('#sh-pwd').value.trim() || null;
     try{
-      const r = await api('/api/admin/shares', { method:'POST', body: JSON.stringify({ file_id: fileId, expires_hours: exp, max_downloads: max }) });
+      const r = await api('/api/admin/shares', { method:'POST', body: JSON.stringify({ file_id: fileId, expires_hours: exp, max_downloads: max, password }) });
       const url = location.origin + r.url;
       openModal(`
         <h3>${esc(t('shareCreated'))}</h3>
@@ -875,7 +885,7 @@ async function loadShares(){
         <tbody>${shares.map(s => `
           <tr>
             <td class="name-cell">${ficon(s.file_name)} ${esc(s.file_name)}</td>
-            <td class="mono"><a href="/s/${s.id}" target="_blank" style="color:#a5d8ff;text-decoration:none">/s/${s.id}</a></td>
+            <td class="mono">${s.has_password?'🔒 ':''}<a href="/s/${s.id}" target="_blank" style="color:#a5d8ff;text-decoration:none">/s/${s.id}</a></td>
             <td class="num">${s.download_count} / ${s.max_downloads ?? '∞'}</td>
             <td class="num">${fmtTime(s.created_at)}</td>
             <td class="num">${s.expires_at ? fmtTime(s.expires_at) : esc(t('forever'))}</td>

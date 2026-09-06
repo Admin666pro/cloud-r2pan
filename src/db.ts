@@ -26,7 +26,8 @@ const SCHEMA_STATEMENTS: string[] = [
     expires_at INTEGER,
     max_downloads INTEGER,
     download_count INTEGER NOT NULL DEFAULT 0,
-    revoked INTEGER NOT NULL DEFAULT 0
+    revoked INTEGER NOT NULL DEFAULT 0,
+    password_hash TEXT
   )`,
   `CREATE INDEX IF NOT EXISTS idx_shares_file ON shares(file_id)`,
   `CREATE TABLE IF NOT EXISTS download_logs (
@@ -67,6 +68,12 @@ export async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
   // 逐条执行 DDL（D1 exec 对多行多语句解析不稳定，batch 更可靠）
   await env.DB.batch(SCHEMA_STATEMENTS.map((sql) => env.DB.prepare(sql)));
+  // 迁移：旧库补 password_hash 列（若已存在则静默跳过）
+  try {
+    await env.DB.prepare("ALTER TABLE shares ADD COLUMN password_hash TEXT").run();
+  } catch {
+    /* 列已存在或重复添加，忽略 */
+  }
   schemaReady = true;
 }
 
