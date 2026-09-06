@@ -1,4 +1,4 @@
-# Crystal Drive
+# cloud-r2pan
 
 iOS 26 液态玻璃风格网盘分享系统，基于 **Cloudflare Workers + R2 + D1** 构建。
 支持文件上传、分享链接（有效期/次数/访问密码）、流量限额、单 IP 限流与自动封禁、下载日志、中英双语。
@@ -33,13 +33,13 @@ iOS 26 液态玻璃风格网盘分享系统，基于 **Cloudflare Workers + R2 +
 
 这些名称在代码中直接使用，改绑定名需同步改代码，请保持一致。
 
-| 绑定名称        | 类型           | 资源名称            | 作用                |
-| ----------- | ------------ | --------------- | ----------------- |
-| `BUCKET`    | R2 Bucket    | `crystal-drive` | 存储上传的文件对象         |
-| `DB`        | D1 Database  | `crystal-drive` | 元数据、分享、日志、配置、流量统计 |
-| `ADMIN_KEY` | Secret（环境变量） | —               | 管理后台登录密钥          |
+| 绑定名称    | 类型           | 资源名称          | 作用                |
+| ------- | ------------ | ------------- | ----------------- |
+| `r2`    | R2 Bucket    | `cloud-r2pan` | 存储上传的文件对象         |
+| `db`    | D1 Database  | `cloud-r2pan` | 元数据、分享、日志、配置、流量统计 |
+| `admin` | Secret（环境变量） | —             | 管理后台登录密钥          |
 
-> Worker 名称：`crystal-drive`；入口：`src/index.ts`。
+> Worker 名称：`cloud-r2pan`；入口：`src/index.ts`。
 
 ***
 
@@ -62,13 +62,13 @@ npx wrangler login
 ### 2. 创建 R2 存储桶
 
 ```bash
-npx wrangler r2 bucket create crystal-drive
+npx wrangler r2 bucket create cloud-r2pan
 ```
 
 ### 3. 创建 D1 数据库，并记录返回的 `database_id`
 
 ```bash
-npx wrangler d1 create crystal-drive
+npx wrangler d1 create cloud-r2pan
 ```
 
 输出中会出现类似：
@@ -83,20 +83,20 @@ database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
 ```jsonc
 "d1_databases": [
-  { "binding": "DB", "database_name": "crystal-drive", "database_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" }
+  { "binding": "DB", "database_name": "cloud-r2pan", "database_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" }
 ]
 ```
 
 > 数据库的建表（`files` / `shares` / `download_logs` / `banned_ips` / `settings` / `traffic_stats`）会在首次请求时由 `ensureSchema` 自动创建，无需手动导入 SQL。
 
-### 5. 设置管理后台密钥 `ADMIN_KEY`
+### 5. 设置管理后台密钥 `admin`
 
 ```bash
 # 交互式输入（输入的内容不会被回显）
-npx wrangler secret put ADMIN_KEY
+npx wrangler secret put admin
 ```
 
-> `ADMIN_KEY` 是登录管理后台的唯一密钥，请务必设置，并妥善保管。
+> `admin` 是登录管理后台的唯一密钥，请务必设置，并妥善保管。
 
 ***
 
@@ -104,7 +104,7 @@ npx wrangler secret put ADMIN_KEY
 
 ### 本地开发预览
 
-启动本地开发服务器（本地会用 `.dev.vars` 里的 `ADMIN_KEY`，D1/R2 为本地模拟）：
+启动本地开发服务器（本地会用 `.dev.vars` 里的 `admin`，D1/R2 为本地模拟）：
 
 ```bash
 npm run dev
@@ -122,41 +122,6 @@ npm run deploy
 
 等价于 `npx wrangler deploy`，会使用 [wrangler.jsonc](wrangler.jsonc) 的配置打包部署 worker `cloud-r2pan`。
 
-### 构建与打包（具体命令）
-
-本项目由 **TypeScript + 多个** **`.html`** **文本模块**组成，必须经 wrangler（内置 esbuild）打包成单个 Worker 才能运行，浏览器不能直接打开源码。
-
-```bash
-# ① 只做 TypeScript 类型检查（不打包，用于快速排错）
-npx tsc --noEmit
-
-# ② 打包到本地（不部署）—— 等价于 npm run build
-npx wrangler deploy --dry-run --outdir=dist
-# 或直接用项目脚本：
-npm run build
-
-# ③ 打包并上传部署（deploy 内部会先自动打包，无需先手动执行 ②）
-npm run deploy
-# 或：npx wrangler deploy
-```
-
-产物说明：
-
-- 输出目录：`dist/`（已写入 `.gitignore`，不会提交）
-
-- 主要文件：`dist/index.js`（被打包后的入口）+ `dist/*.html`（文本模块按原样并入）
-
-- 体积：约 120 KB，gzip 约 33 KB（每次 `npm run build` 末尾会显示实际大小）
-
-```bash
-# 查看打包出来的本地目录结构
-ls -la dist/
-```
-
-- `npm run build`：只「打包不上传」，适合本地检查产物、或作为 CI 校验步骤。
-
-- `npm run deploy`：一键「打包 + 上传 + 生效」，日常上线只用它即可。
-
 ### 查看线上日志
 
 ```bash
@@ -168,11 +133,11 @@ npm run tail
 
 部署成功后：
 
-- 管理后台：`https://crystal-drive.<你的账号>.workers.dev/admin`
+- 管理后台：`https://cloud-r2pan.<你的账号>.workers.dev/admin`
 
-- 用 `ADMIN_KEY` 登录
+- 用 `admin` 登录
 
-- 分享页格式：`https://crystal-drive.<你的账号>.workers.dev/s/<token>`
+- 分享页格式：`https://cloud-r2pan.<你的账号>.workers.dev/s/<token>`
 
 ***
 
@@ -189,37 +154,37 @@ npm run tail
 ### 5.1 创建 R2 存储桶
 
 1. 左侧菜单 → **R2** → **Create bucket**
-2. 名称填 `crystal-drive` → 选区域 → **Create bucket**
+2. 名称填 `cloud-r2pan` → 选区域 → **Create bucket**
 
 ### 5.2 创建 D1 数据库
 
 1. 左侧菜单 → **D1** → **Create database**
-2. 名称填 `crystal-drive` → **Create**
+2. 名称填 `cloud-r2pan` → **Create**
 3. **复制页面上的** **`database_id`**（形如 UUID），下面绑定要用
 
 ### 5.3 创建 Worker
 
 1. 左侧菜单 → **Workers & Pages** → **Create** → **Worker**
-2. 名称填 `crystal-drive` → **Deploy** → 进入该 Worker 页面
+2. 名称填 `cloud-r2pan` → **Deploy** → 进入该 Worker 页面
 
 ### 5.4 添加绑定（Bindings）
 
 1. 在该 Worker 里 → **Settings** → **Bindings** → **Add binding**
 2. 添加 **R2 Bucket**：
 
-   - **Variable name** 填 `BUCKET`（绑定名固定，勿改）
+   - **Variable name** 填 `r2`（绑定名固定，勿改）
 
-   - R2 bucket 选 `crystal-drive`
+   - R2 bucket 选 `cloud-r2pan`
 3. 添加 **D1 Database**：
 
-   - **Variable name** 填 `DB`（绑定名固定，勿改）
+   - **Variable name** 填 `db`（绑定名固定，勿改）
 
-   - 选 `crystal-drive`（或直接粘贴第 5.2 步的 `database_id`）
+   - 选 `cloud-r2pan`（或直接粘贴第 5.2 步的 `database_id`）
 
 ### 5.5 设置管理密钥 ADMIN\_KEY
 
 1. 同一个 Worker → **Settings** → **Variables and Secrets** → **Add** → **Secret**
-2. Variable name 填 `ADMIN_KEY`，值填你的管理密码 → **Deploy**
+2. Variable name 填 `admin`，值填你的管理密码 → **Deploy**
 
 ### 5.6 上传代码（网页版最后一步）
 
@@ -233,11 +198,11 @@ npm run deploy
 
 ### 5.7 访问
 
-- 管理后台：`https://crystal-drive.<你的账号>.workers.dev/admin`（用 `ADMIN_KEY` 登录）
+- 管理后台：`https://cloud-r2pan.<你的账号>.workers.dev/admin`（用 `admin` 登录）
 
-- 分享页格式：`https://crystal-drive.<你的账号>.workers.dev/s/<token>`
+- 分享页格式：`https://cloud-r2pan.<你的账号>.workers.dev/s/<token>`
 
-> 日常用网页端查看：**Workers → crystal-drive → Console / Logs / Metrics**（日志、监控）、**Settings → Variables/Bindings**（改密钥/绑定）。
+> 日常用网页端查看：**Workers → cloud-r2pan → Console / Logs / Metrics**（日志、监控）、**Settings → Variables/Bindings**（改密钥/绑定）。
 
 ***
 
@@ -259,7 +224,7 @@ npm run deploy
 | `CF_API_TOKEN`   | Secret | Cloudflare API 令牌，需有 `Workers Scripts: Edit`、`Workers R2`、`Workers D1` 权限 |
 | `CF_ACCOUNT_ID`  | Secret | 你的 Cloudflare 账户 ID（账户首页右下角可查）                                            |
 | `D1_DATABASE_ID` | Secret | 上面第 3 步 D1 的 `database_id`，用于 CI 替换占位符                                    |
-| ——               | ——     | **`ADMIN_KEY`** **建议在 CI 外手动设置一次**（见下方说明）                                 |
+| ——               | ——     | **`admin`** **建议在 CI 外手动设置一次**（见下方说明）                                     |
 
 > 获取 `CF_API_TOKEN`：Cloudflare Dashboard → 右上角「My Profile」→ 「API Tokens」→ 创建，模板选
 > 「Edit Cloudflare Workers」，再勾选 R2 / D1 权限。
@@ -303,9 +268,9 @@ jobs:
           command: deploy
 ```
 
-### 5.3 关于 `ADMIN_KEY` 的 CI 处理
+### 5.3 关于 `admin` 的 CI 处理
 
-`ADMIN_KEY` 通过 `wrangler secret put` 设置，属于 Cloudflare Secret，**不建议**放到 Git 仓库。
+`admin` 通过 `wrangler secret put` 设置，属于 Cloudflare Secret，**不建议**放到 Git 仓库。
 推荐二选一：
 
 - **方案 A（推荐）**：在 CI 外手动执行一次（见「三.5」），CI 只负责代码部署；密钥已持久化在 Cloudflare，无需重复设置。
@@ -313,27 +278,27 @@ jobs:
 - **方案 B（可选）**：若想完全自动化，改用一个独立 job 内联设置（注意：secret 一旦已有则保留旧值，幂等）：
 
   ```yaml
-  - name: Ensure ADMIN_KEY secret
+  - name: Ensure admin secret
     env:
       CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
     run: |
-      echo "${{ secrets.ADMIN_KEY }}" | npx wrangler secret put ADMIN_KEY --name crystal-drive
+      echo "${{ secrets.admin }}" | npx wrangler secret put admin --name cloud-r2pan
   ```
 
-  需要额外在仓库配置一个 `ADMIN_KEY` Secret。
+  需要额外在仓库配置一个 `admin` Secret。
 
 ***
 
 ## 七、环境差异与注意事项
 
-- **本地开发**：绑定在本地无真实资源，D1 / R2 由 Miniflare 模拟；`.dev.vars` 提供 `ADMIN_KEY`。
+- **本地开发**：绑定在本地无真实资源，D1 / R2 由 Miniflare 模拟；`.dev.vars` 提供 `admin`。
   请把 `.dev.vars` 加入 `.gitignore`，不要提交到仓库。
 
 - **数据库迁移**：`ensureSchema` 使用 `CREATE TABLE IF NOT EXISTS`，并对 `shares` 表执行
   `ADD COLUMN password_hash` 幂等迁移（重复执行安全）。
 
-- **绑定名与资源名**：绑定名（`BUCKET` / `DB`）是代码里用的名字；资源名同取 `crystal-drive`。
+- **绑定名与资源名**：绑定名（`r2` / `db`）是代码里用的名字；资源名同取 `cloud-r2pan`。
   若改用其他资源名，只需改 `wrangler.jsonc`，但 Database ID 必须对应你的 D1 实例。
 
 - **尺寸限制**：单文件上传上限 100 MB（Worker 请求体限制），超过会被前端拦截提示。
@@ -345,11 +310,11 @@ jobs:
 
 ## 八、常见问题
 
-| 问题             | 处理                                                           |
-| -------------- | ------------------------------------------------------------ |
-| 首页 500 / D1 报错 | 确认 `wrangler.jsonc` 的 `database_id` 已替换为真实 ID                |
-| 登录一直失败         | 确认已执行 `npx wrangler secret put ADMIN_KEY`，输入与 `ADMIN_KEY` 一致 |
-| 上传对象在 R2 找不到   | 确认 R2 桶名 `crystal-drive` 已创建且与配置一致                           |
-| 想部署到其它名称       | 改 `wrangler.jsonc` 的 `name` 字段                               |
-| 网页端建了资源，代码还没生效 | 控制台只负责 R2/D1/绑定/密钥，代码需在本地执行一次 `npm run deploy`               |
+| 问题             | 处理                                                   |
+| -------------- | ---------------------------------------------------- |
+| 首页 500 / D1 报错 | 确认 `wrangler.jsonc` 的 `database_id` 已替换为真实 ID        |
+| 登录一直失败         | 确认已执行 `npx wrangler secret put admin`，输入与 `admin` 一致 |
+| 上传对象在 R2 找不到   | 确认 R2 桶名 `cloud-r2pan` 已创建且与配置一致                     |
+| 想部署到其它名称       | 改 `wrangler.jsonc` 的 `name` 字段                       |
+| 网页端建了资源，代码还没生效 | 控制台只负责 R2/D1/绑定/密钥，代码需在本地执行一次 `npm run deploy`       |
 
