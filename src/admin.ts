@@ -3,6 +3,7 @@ import { ensureSchema, randomId } from "./db";
 import { getSettings, updateSettings } from "./settings";
 import { checkAdminKey, createSession, verifySession, clientIp, rateLimitLogin } from "./auth";
 import { pickLang } from "./i18n";
+import { hashPassword } from "./public";
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -209,7 +210,7 @@ export async function handleAdminApi(
 
   // ── 创建分享 ──────────────────────────────────────
   if (path === "/api/admin/shares" && method === "POST") {
-    const body = await readJson<{ file_id: string; expires_hours: number | null; max_downloads: number | null }>(req);
+    const body = await readJson<{ file_id: string; expires_hours: number | null; max_downloads: number | null; password: string | null }>(req);
     if (!body.file_id) return json({ error: msg(req, "缺少 file_id", "Missing file_id") }, 400);
     const file = await env.DB.prepare("SELECT id FROM files WHERE id = ?1").bind(body.file_id).first();
     if (!file) return json({ error: msg(req, "文件不存在", "File not found") }, 404);
@@ -217,11 +218,14 @@ export async function handleAdminApi(
       body.expires_hours && body.expires_hours > 0 ? Date.now() + body.expires_hours * 3600_000 : null;
     const maxDownloads =
       body.max_downloads && body.max_downloads > 0 ? Math.floor(body.max_downloads) : null;
+    const password =
+      typeof body.password === "string" && body.password.trim() ? body.password.trim() : null;
+    const passwordHash = password ? await hashPassword(password) : null;
     const id = randomId(10);
     await env.DB.prepare(
-      "INSERT INTO shares(id, file_id, created_at, expires_at, max_downloads) VALUES(?1, ?2, ?3, ?4, ?5)"
+      "INSERT INTO shares(id, file_id, created_at, expires_at, max_downloads, password_hash) VALUES(?1, ?2, ?3, ?4, ?5, ?6)"
     )
-      .bind(id, body.file_id, Date.now(), expiresAt, maxDownloads)
+      .bind(id, body.file_id, Date.now(), expiresAt, maxDownloads, passwordHash)
       .run();
     return json({ ok: true, id, url: `/s/${id}` }, 201);
   }
@@ -230,13 +234,15 @@ export async function handleAdminApi(
   if (path === "/api/admin/shares" && method === "GET") {
     const { results } = await env.DB.prepare(
       `SELECT s.id, s.file_id, s.created_at, s.expires_at, s.max_downloads, s.download_count, s.revoked,
-              f.name AS file_name, f.size AS file_size
+              s.password_hash, f.name AS file_name, f.size AS file_size
        FROM shares s JOIN files f ON f.id = s.file_id
        ORDER BY s.created_at DESC`
     ).all();
     const now = Date.now();
     const shares = (results ?? []).map((s: any) => ({
       ...s,
+      has_password: !!s.password_hash,
+      password_hash: undefined,
       status: s.revoked
         ? "revoked"
         : s.expires_at && s.expires_at < now

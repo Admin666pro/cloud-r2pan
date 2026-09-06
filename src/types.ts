@@ -12,6 +12,8 @@ export interface ShareRow {
   max_downloads: number | null;
   download_count: number;
   revoked: number;
+  /** 分享访问密码哈希（salt:sha256hex），未设置则为 null */
+  password_hash: string | null;
 }
 
 export interface FileRow {
