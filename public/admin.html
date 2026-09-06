@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Crystal Drive · 管理后台</title>
+<style>
+:root {
+  --glass: rgba(255,255,255,.09);
+  --glass-strong: rgba(255,255,255,.14);
+  --stroke: rgba(255,255,255,.16);
+  --stroke-strong: rgba(255,255,255,.28);
+  --text: #fff;
+  --text-2: rgba(255,255,255,.66);
+  --text-3: rgba(255,255,255,.42);
+  --blue: #0a84ff;
+  --radius: 24px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  min-height: 100vh; color: var(--text); position: relative; overflow-x: hidden;
+  background: linear-gradient(165deg, #0b1026 0%, #151238 42%, #26104a 100%);
+  background-attachment: fixed;
+  -webkit-tap-highlight-color: transparent;
+}
+::selection { background: rgba(10,132,255,.4); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+
+/* ── 背景光斑 ─────────────────────────── */
+.orb { position: fixed; border-radius: 50%; filter: blur(100px); opacity: .45; pointer-events: none; animation: drift 22s ease-in-out infinite alternate; z-index: 0; }
+.o1 { width: 52vmax; height: 52vmax; background: #22d3ee; top: -20%; left: -16%; }
+.o2 { width: 44vmax; height: 44vmax; background: #7c5cf6; bottom: -22%; right: -12%; animation-delay: -8s; }
+.o3 { width: 30vmax; height: 30vmax; background: #ec4899; top: 48%; left: 12%; animation-delay: -15s; opacity: .3; }
+@keyframes drift { from { transform: translate(0,0) scale(1); } to { transform: translate(5vw,-6vh) scale(1.15); } }
+
+/* ── 布局 ─────────────────────────────── */
+#app { position: relative; z-index: 1; }
+.wrap { max-width: 1060px; margin: 0 auto; padding: 20px clamp(14px, 3vw, 28px) 60px; }
+
+/* ── 玻璃卡片 ─────────────────────────── */
+.glass {
+  background: linear-gradient(150deg, rgba(255,255,255,.12), rgba(255,255,255,.045));
+  backdrop-filter: blur(28px) saturate(170%); -webkit-backdrop-filter: blur(28px) saturate(170%);
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 44px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.22);
+}
+
+/* ── 顶栏 ─────────────────────────────── */
+.topbar {
+  position: sticky; top: 12px; z-index: 50; margin-bottom: 22px;
+  display: flex; align-items: center; gap: 12px; padding: 12px 18px;
+  background: linear-gradient(150deg, rgba(255,255,255,.13), rgba(255,255,255,.06));
+  backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: 1px solid var(--stroke-strong); border-radius: 22px;
+  box-shadow: 0 14px 40px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.25);
+}
+.logo { width: 38px; height: 38px; border-radius: 12px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(150deg, #67e8f9, #3b82f6 55%, #8b5cf6);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 6px 16px rgba(59,130,246,.4); }
+.logo svg { width: 22px; height: 22px; }
+.topbar h1 { font-size: 17px; font-weight: 700; letter-spacing: -.02em; }
+.topbar .sub { font-size: 11.5px; color: var(--text-3); margin-top: 1px; }
+.topbar .spacer { flex: 1; }
+.traffic-pill {
+  display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 14px;
+  background: rgba(255,255,255,.09); border: 1px solid var(--stroke);
+  font-size: 13px; font-variant-numeric: tabular-nums; cursor: pointer; white-space: nowrap;
+  transition: background .2s;
+}
+.traffic-pill:hover { background: rgba(255,255,255,.15); }
+.traffic-pill .bar { width: 52px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.14); overflow: hidden; }
+.traffic-pill .bar i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg,#34d399,#0a84ff); transition: width .5s cubic-bezier(.22,1,.36,1); }
+.traffic-pill.danger .bar i { background: linear-gradient(90deg,#fbbf24,#ff453a); }
+.traffic-pill.danger { color: #ffb3ae; }
+
+/* ── 分段控制 ─────────────────────────── */
+.seg {
+  display: flex; gap: 4px; padding: 4px; margin-bottom: 22px; border-radius: 18px;
+  background: rgba(255,255,255,.08); border: 1px solid var(--stroke);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  overflow-x: auto; scrollbar-width: none;
+}
+.seg::-webkit-scrollbar { display: none; }
+.seg button {
+  flex: 1; white-space: nowrap; padding: 9px 18px; border: none; border-radius: 14px;
+  background: transparent; color: var(--text-2); font-size: 14px; font-weight: 600;
+  font-family: inherit; cursor: pointer; transition: all .2s;
+}
+.seg button.active {
+  color: #fff; background: rgba(255,255,255,.16);
+  box-shadow: 0 4px 14px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.25);
+}
+.seg button .badge { display: inline-block; min-width: 18px; padding: 1px 5px; margin-left: 5px; border-radius: 9px;
+  background: rgba(10,132,255,.85); font-size: 11px; line-height: 1.5; vertical-align: 1px; }
+
+/* ── 统计卡片 ─────────────────────────── */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.stat-card { padding: 20px 22px; border-radius: 22px; animation: fadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+.stat-card:nth-child(2){animation-delay:.05s}.stat-card:nth-child(3){animation-delay:.1s}.stat-card:nth-child(4){animation-delay:.15s}
+.stat-card .label { font-size: 13px; color: var(--text-2); display: flex; align-items: center; gap: 7px; }
+.stat-card .value { margin-top: 8px; font-size: 27px; font-weight: 750; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.stat-card .value small { font-size: 14px; font-weight: 600; color: var(--text-2); margin-left: 3px; }
+.progress { margin-top: 12px; height: 7px; border-radius: 4px; background: rgba(255,255,255,.12); overflow: hidden; }
+.progress i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg,#34d399,#0a84ff); transition: width .6s cubic-bezier(.22,1,.36,1); }
+.progress.hot i { background: linear-gradient(90deg,#fbbf24,#ff453a); }
+.stat-card .foot { margin-top: 8px; font-size: 12px; color: var(--text-3); }
+
+/* ── 通用卡片区块 ─────────────────────── */
+.section { padding: 22px; margin-bottom: 18px; }
+.section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.section-title h2 { font-size: 16px; font-weight: 700; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
+
+/* ── 图表 ─────────────────────────────── */
+.chart { display: flex; align-items: flex-end; gap: 6px; height: 150px; padding-top: 8px; }
+.chart .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 7px; min-width: 0; height: 100%; }
+.chart .bar { width: 100%; max-width: 34px; border-radius: 8px 8px 4px 4px;
+  background: linear-gradient(180deg, rgba(103,232,249,.95), rgba(59,130,246,.55));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.4); transition: height .7s cubic-bezier(.22,1,.36,1); min-height: 3px; position: relative; }
+.chart .bar:hover { background: linear-gradient(180deg, #67e8f9, #3b82f6); }
+.chart .bar span { position: absolute; top: -22px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; color: var(--text-2); opacity: 0; transition: opacity .15s; white-space: nowrap; }
+.chart .bar:hover span { opacity: 1; }
+.chart .day { font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* ── 表格 ─────────────────────────────── */
+.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.tbl th { text-align: left; padding: 9px 10px; color: var(--text-3); font-weight: 600; font-size: 12px;
+  border-bottom: 1px solid var(--stroke); white-space: nowrap; }
+.tbl td { padding: 11px 10px; border-bottom: 1px solid rgba(255,255,255,.06); white-space: nowrap; vertical-align: middle; }
+.tbl tr:last-child td { border-bottom: none; }
+.tbl tr { transition: background .15s; }
+.tbl tbody tr:hover { background: rgba(255,255,255,.05); }
+.tbl .num { font-variant-numeric: tabular-nums; }
+.mono { font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace; font-size: 12.5px; }
+.name-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.empty { padding: 44px 20px; text-align: center; color: var(--text-3); font-size: 14px; }
+.empty .icon { font-size: 34px; margin-bottom: 10px; opacity: .7; }
+
+/* ── 文件图标 ─────────────────────────── */
+.ficon { width: 38px; height: 38px; border-radius: 11px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; letter-spacing: -.02em;
+  background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.18); vertical-align: middle; }
+
+/* ── 按钮 ─────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px 16px; border: 1px solid var(--stroke-strong); border-radius: 13px;
+  background: rgba(255,255,255,.1); color: #fff; font-size: 13.5px; font-weight: 600; font-family: inherit;
+  cursor: pointer; transition: all .18s; white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.16);
+}
+.btn:hover { background: rgba(255,255,255,.17); transform: translateY(-1px); }
+.btn:active { transform: scale(.96); }
+.btn.primary { background: linear-gradient(180deg,#3d9bff,#0a7cff); border-color: transparent;
+  box-shadow: 0 8px 22px rgba(10,124,255,.38), inset 0 1px 0 rgba(255,255,255,.35); }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.danger { background: rgba(255,69,58,.16); border-color: rgba(255,69,58,.4); color: #ffb3ae; }
+.btn.danger:hover { background: rgba(255,69,58,.28); }
+.btn.sm { padding: 6px 12px; font-size: 12.5px; border-radius: 10px; }
+.btn[disabled] { opacity: .4; pointer-events: none; }
+
+/* ── 上传区 ───────────────────────────── */
+.dropzone {
+  margin-bottom: 18px; padding: 34px 20px; text-align: center; cursor: pointer;
+  border: 1.5px dashed rgba(255,255,255,.28); border-radius: var(--radius);
+  background: rgba(255,255,255,.045); transition: all .2s;
+}
+.dropzone:hover, .dropzone.over { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.5); transform: scale(1.005); }
+.dropzone .icon { font-size: 34px; margin-bottom: 10px; }
+.dropzone .t { font-size: 15px; font-weight: 650; }
+.dropzone .d { margin-top: 6px; font-size: 12.5px; color: var(--text-3); }
+.upload-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; margin-top: 10px;
+  border-radius: 16px; background: rgba(255,255,255,.07); border: 1px solid var(--stroke); font-size: 13.5px; }
+.upload-item .prog { flex: 1; height: 6px; border-radius: 3px; background: rgba(255,255,255,.12); overflow: hidden; }
+.upload-item .prog i { display: block; height: 100%; width: 0; border-radius: 3px;
+  background: linear-gradient(90deg,#34d399,#0a84ff); transition: width .2s; }
+.upload-item .pct { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
+
+/* ── 表单 ─────────────────────────────── */
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 13px; font-weight: 600; color: var(--text-2); margin-bottom: 7px; }
+.field input, .field select {
+  width: 100%; padding: 12px 14px; border-radius: 14px; font-size: 15px; font-family: inherit;
+  color: #fff; background: rgba(255,255,255,.09); border: 1px solid var(--stroke-strong); outline: none;
+  transition: border .2s, background .2s; -webkit-appearance: none; appearance: none;
+}
+.field input:focus { border-color: rgba(10,132,255,.7); background: rgba(255,255,255,.13); }
+.field input::placeholder { color: var(--text-3); }
+.field .tip { margin-top: 6px; font-size: 12px; color: var(--text-3); line-height: 1.5; }
+
+/* ── iOS 分组设置列表 ─────────────────── */
+.group { border-radius: 22px; overflow: hidden; margin-bottom: 16px; }
+.group .row {
+  display: flex; align-items: center; gap: 12px; padding: 14px 18px;
+  border-bottom: 1px solid rgba(255,255,255,.07); background: rgba(255,255,255,.05);
+}
+.group .row:last-child { border-bottom: none; }
+.group .row .info { flex: 1; min-width: 0; }
+.group .row .info .t { font-size: 14.5px; font-weight: 600; }
+.group .row .info .d { margin-top: 3px; font-size: 12.5px; color: var(--text-3); line-height: 1.5; }
+.group .row input[type=number], .group .row input[type=text] {
+  width: 110px; padding: 9px 12px; border-radius: 12px; font-size: 14.5px; font-family: inherit;
+  color: #fff; background: rgba(255,255,255,.1); border: 1px solid var(--stroke-strong); outline: none; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.group .row input[type=number]:focus { border-color: rgba(10,132,255,.7); }
+
+/* iOS 开关 */
+.switch { position: relative; width: 50px; height: 30px; flex: none; cursor: pointer; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .track { position: absolute; inset: 0; border-radius: 16px; background: rgba(255,255,255,.16); transition: background .25s; }
+.switch .thumb { position: absolute; top: 2px; left: 2px; width: 26px; height: 26px; border-radius: 50%;
+  background: #fff; box-shadow: 0 3px 8px rgba(0,0,0,.35); transition: transform .25s cubic-bezier(.22,1.2,.36,1); }
+.switch input:checked + .track { background: linear-gradient(180deg,#3d9bff,#0a7cff); }
+.switch input:checked + .track .thumb { transform: translateX(20px); }
+
+/* ── 模态框（底部弹层风格） ───────────── */
+.modal-mask { position: fixed; inset: 0; z-index: 100; display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0,0,0,.45); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  animation: fadeIn .25s both; }
+@media (min-width: 640px) { .modal-mask { align-items: center; padding-bottom: 0; } }
+.modal {
+  width: 100%; max-width: 480px; max-height: 88vh; overflow-y: auto;
+  padding: 26px; border-radius: 32px 32px 0 0;
+  background: linear-gradient(160deg, rgba(40,38,80,.92), rgba(24,22,52,.95));
+  backdrop-filter: blur(40px) saturate(180%); -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid var(--stroke-strong); border-bottom: none;
+  box-shadow: 0 -20px 60px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.2);
+  animation: sheetUp .4s cubic-bezier(.22,1.1,.36,1) both;
+}
+@media (min-width: 640px) { .modal { border-radius: 32px; border-bottom: 1px solid var(--stroke-strong); } }
+@keyframes sheetUp { from { transform: translateY(60px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal h3 { font-size: 18px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 4px; }
+.modal .sub { font-size: 13px; color: var(--text-3); margin-bottom: 18px; }
+.modal .actions { display: flex; gap: 10px; margin-top: 20px; }
+.modal .actions .btn { flex: 1; padding: 13px; font-size: 15px; border-radius: 16px; }
+.link-box { display: flex; gap: 8px; margin-top: 4px; }
+.link-box input { flex: 1; padding: 12px 14px; border-radius: 14px; font-size: 14px;
+  font-family: ui-monospace, "SF Mono", monospace; color: #a5d8ff;
+  background: rgba(0,0,0,.3); border: 1px solid var(--stroke); outline: none; }
+
+/* ── Toast ────────────────────────────── */
+#toasts { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 200;
+  display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+.toast {
+  padding: 11px 22px; border-radius: 16px; font-size: 14px; font-weight: 600; color: #fff;
+  background: rgba(30,28,60,.88); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--stroke-strong); box-shadow: 0 12px 32px rgba(0,0,0,.45);
+  animation: toastIn .35s cubic-bezier(.22,1.2,.36,1) both;
+}
+.toast.ok { border-color: rgba(52,211,153,.5); }
+.toast.err { border-color: rgba(255,69,58,.55); }
+.toast.out { animation: toastOut .3s ease both; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-16px) scale(.92); } to { opacity: 1; transform: none; } }
+@keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateY(-12px) scale(.94); } }
+
+/* ── 分页 ─────────────────────────────── */
+.pager { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; }
+.pager .info { font-size: 12.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* ── 状态徽章 ─────────────────────────── */
+.tag { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 9px; font-size: 11.5px; font-weight: 650; }
+.tag.active { background: rgba(52,211,153,.16); color: #6ee7b7; }
+.tag.expired { background: rgba(255,159,10,.16); color: #fcd34d; }
+.tag.revoked { background: rgba(255,69,58,.16); color: #fda293; }
+.tag.maxed { background: rgba(255,159,10,.16); color: #fcd34d; }
+.tag i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* ── 警示横幅 ─────────────────────────── */
+.banner { display: flex; gap: 12px; align-items: flex-start; padding: 15px 18px; margin-bottom: 18px;
+  border-radius: 20px; background: rgba(255,159,10,.12); border: 1px solid rgba(255,159,10,.38); }
+.banner .ic { font-size: 20px; line-height: 1.3; }
+.banner .t { font-size: 14px; font-weight: 650; color: #ffd9a0; }
+.banner .d { margin-top: 3px; font-size: 12.5px; color: rgba(255,217,160,.75); line-height: 1.55; }
+
+/* ── 登录页 ───────────────────────────── */
+#login-view { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; position: relative; z-index: 1; }
+.login-card { width: 100%; max-width: 380px; padding: 44px 34px 36px; text-align: center;
+  border-radius: 36px; animation: fadeUp .6s cubic-bezier(.22,1.1,.36,1) both; }
+.login-card .logo { width: 74px; height: 74px; border-radius: 24px; margin: 0 auto 20px; }
+.login-card .logo svg { width: 40px; height: 40px; }
+.login-card h1 { font-size: 23px; font-weight: 750; letter-spacing: -.03em; }
+.login-card .sub { margin: 8px 0 26px; font-size: 13.5px; color: var(--text-3); }
+.login-card input { width: 100%; padding: 15px 18px; border-radius: 18px; font-size: 16px; font-family: inherit;
+  color: #fff; background: rgba(255,255,255,.09); border: 1px solid var(--stroke-strong); outline: none; text-align: center;
+  transition: border .2s, background .2s; }
+.login-card input:focus { border-color: rgba(10,132,255,.75); background: rgba(255,255,255,.13); }
+.login-card .btn { width: 100%; margin-top: 14px; padding: 15px; font-size: 16px; border-radius: 18px; }
+.login-card .err { margin-top: 12px; font-size: 13px; color: #fda293; min-height: 18px; }
+.shake { animation: shake .4s; }
+@keyframes shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-9px)} 40%,80%{transform:translateX(9px)} }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+.spin { width: 26px; height: 26px; border-radius: 50%; border: 3px solid rgba(255,255,255,.18); border-top-color: #fff; animation: spin .8s linear infinite; margin: 30px auto; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.actions-cell { display: flex; gap: 6px; }
+@media (max-width: 720px) {
+  .tbl th:nth-child(n+5), .tbl td:nth-child(n+5) { display: none; }
+  .topbar .sub { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>
+<div id="toasts"></div>
+<div id="app"><div class="spin"></div></div>
+
+<script>
+/* ═══════════ 工具函数 ═══════════ */
+const $ = (s, el=document) => el.querySelector(s);
+const $$ = (s, el=document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function fmtSize(n){
+  n = Number(n)||0;
+  if(n < 1024) return n + ' B';
+  const u = ['KB','MB','GB','TB']; let i = -1;
+  do { n /= 1024; i++; } while(n >= 1024 && i < u.length-1);
+  return n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2) + ' ' + u[i];
+}
+function fmtTime(ts){
+  if(!ts) return '—';
+  const d = new Date(Number(ts)), p = x => String(x).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+const EXT_COLORS = {
+  zip:'#ffb340',rar:'#ffb340','7z':'#ffb340',tar:'#ffb340',gz:'#ffb340',
+  pdf:'#ff6961',doc:'#5b9cf5',docx:'#5b9cf5',txt:'#9aa4b2',md:'#9aa4b2',
+  xls:'#3ecf8e',xlsx:'#3ecf8e',csv:'#3ecf8e',ppt:'#ff9f0a',pptx:'#ff9f0a',
+  mp3:'#bf5af2',wav:'#bf5af2',flac:'#bf5af2',m4a:'#bf5af2',
+  mp4:'#ff453a',mov:'#ff453a',mkv:'#ff453a',avi:'#ff453a',
+  png:'#30d158',jpg:'#30d158',jpeg:'#30d158',gif:'#30d158',webp:'#30d158',svg:'#30d158',
+  apk:'#3ecf8e',exe:'#9aa4b2',iso:'#9aa4b2',dmg:'#9aa4b2',default:'#8ea0c8'
+};
+const extOf = n => (/\.([a-z0-9]+)$/i.exec(n||'')||[])[1]?.toLowerCase() || '';
+const extColor = n => EXT_COLORS[extOf(n)] || EXT_COLORS.default;
+const ficon = name => `<span class="ficon" style="color:${extColor(name)}">${esc((extOf(name)||'?').toUpperCase().slice(0,4))}</span>`;
+
+async function api(path, opts={}){
+  const r = await fetch(path, { credentials:'same-origin', ...opts,
+    headers: { ...(opts.body && !(opts.body instanceof FormData) ? {'content-type':'application/json'} : {}), ...(opts.headers||{}) } });
+  let data = null;
+  try { data = await r.json(); } catch {}
+  if(r.status === 401 && !path.includes('/login')) { showLogin(); throw new Error('unauthorized'); }
+  if(!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
+  return data;
+}
+
+function toast(msg, type='ok'){
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, 2600);
+}
+
+function copyText(text){
+  if(navigator.clipboard?.writeText) return navigator.clipboard.writeText(text).then(() => toast('已复制到剪贴板'));
+  const ta = document.createElement('textarea');
+  ta.value = text; document.body.appendChild(ta); ta.select();
+  document.execCommand('copy'); ta.remove();
+  return Promise.resolve(toast('已复制到剪贴板'));
+}
+
+const confirmDialog = (title, msg, danger=true) => new Promise(resolve => {
+  openModal(`
+    <h3>${esc(title)}</h3>
+    <div class="sub">${esc(msg)}</div>
+    <div class="actions">
+      <button class="btn" data-x>取消</button>
+      <button class="btn ${danger?'danger':'primary'}" data-ok>确定</button>
+    </div>`);
+  $('[data-ok]').onclick = () => { closeModal(); resolve(true); };
+  $('[data-x]').onclick = () => { closeModal(); resolve(false); };
+});
+
+/* ═══════════ 模态框 ═══════════ */
+function openModal(html){
+  closeModal();
+  const mask = document.createElement('div');
+  mask.className = 'modal-mask'; mask.id = 'modal';
+  mask.innerHTML = `<div class="modal">${html}</div>`;
+  mask.addEventListener('click', e => { if(e.target === mask) closeModal(); });
+  document.body.appendChild(mask);
+}
+function closeModal(){ $('#modal')?.remove(); }
+
+/* ═══════════ 登录视图 ═══════════ */
+let siteTitle = 'Crystal Drive';
+function showLogin(){
+  $('#app').innerHTML = `
+  <div id="login-view">
+    <div class="login-card glass">
+      <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2L21 8.5V15.5L12 22L3 15.5V8.5L12 2Z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round" fill="rgba(255,255,255,.14)"/><path d="M12 2V22M3 8.5L12 15L21 8.5M3 15.5L12 9L21 15.5" stroke="#fff" stroke-width="1.2" opacity=".65"/></svg></div>
+      <h1>${esc(siteTitle)}</h1>
+      <div class="sub">管理后台 · 请输入管理密钥登录</div>
+      <form id="login-form">
+        <input type="password" id="login-key" placeholder="管理密钥 (ADMIN_KEY)" autocomplete="current-password" autofocus>
+        <button class="btn primary" type="submit">登录</button>
+        <div class="err" id="login-err"></div>
+      </form>
+    </div>
+  </div>`;
+  $('#login-form').onsubmit = async e => {
+    e.preventDefault();
+    const key = $('#login-key').value.trim();
+    if(!key) return;
+    try{
+      await api('/api/admin/login', { method:'POST', body: JSON.stringify({ key }) });
+      showApp();
+    }catch(err){
+      $('#login-err').textContent = err.message;
+      $('.login-card').classList.remove('shake'); void $('.login-card').offsetWidth;
+      $('.login-card').classList.add('shake');
+    }
+  };
+  $('#login-key').focus();
+}
+
+/* ═══════════ 主应用 ═══════════ */
+let currentTab = 'overview';
+let logsPage = 1, logsQuery = '';
+
+async function showApp(){
+  try{
+    const s = await api('/api/admin/session');
+    siteTitle = s.site_title || siteTitle;
+    document.title = `${siteTitle} · 管理后台`;
+  }catch{}
+  $('#app').innerHTML = `
+  <div class="wrap">
+    <div class="topbar">
+      <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2L21 8.5V15.5L12 22L3 15.5V8.5L12 2Z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round" fill="rgba(255,255,255,.14)"/><path d="M12 2V22M3 8.5L12 15L21 8.5M3 15.5L12 9L21 15.5" stroke="#fff" stroke-width="1.2" opacity=".65"/></svg></div>
+      <div><h1>${esc(siteTitle)}</h1><div class="sub">管理后台 · Cloudflare Workers + R2</div></div>
+      <div class="spacer"></div>
+      <div class="traffic-pill" id="traffic-pill" title="本月流量（点击跳转设置）">
+        <span class="bar"><i id="pill-bar" style="width:0%"></i></span>
+        <span id="pill-text">— / —</span>
+      </div>
+      <button class="btn sm" id="logout-btn">退出</button>
+    </div>
+    <div class="seg" id="tabs">
+      <button data-tab="overview" class="active">概览</button>
+      <button data-tab="files">文件</button>
+      <button data-tab="shares">分享</button>
+      <button data-tab="logs">记录</button>
+      <button data-tab="bans">封禁</button>
+      <button data-tab="settings">设置</button>
+    </div>
+    <div id="view"></div>
+  </div>`;
+  $$('#tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+  $('#logout-btn').onclick = async () => { await api('/api/admin/logout', {method:'POST'}); showLogin(); };
+  $('#traffic-pill').onclick = () => switchTab('settings');
+  switchTab('overview');
+}
+
+function switchTab(tab){
+  currentTab = tab;
+  $$('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  const v = $('#view');
+  v.innerHTML = '<div class="spin"></div>';
+  ({ overview: loadOverview, files: loadFiles, shares: loadShares, logs: loadLogs, bans: loadBans, settings: loadSettings })[tab]().catch(e => {
+    v.innerHTML = `<div class="glass section"><div class="empty"><div class="icon">⚠️</div>${esc(e.message)}</div></div>`;
+  });
+}
+
+/* ═══════════ 概览 ═══════════ */
+async function loadOverview(){
+  const s = await api('/api/admin/stats');
+  // 顶栏流量胶囊
+  const pill = $('#traffic-pill');
+  if(pill){
+    pill.classList.toggle('danger', s.traffic.quota_exceeded);
+    $('#pill-bar').style.width = (s.traffic.limit > 0 ? Math.min(100, s.traffic.percent) : 0) + '%';
+    $('#pill-text').textContent = s.traffic.limit > 0
+      ? `${fmtSize(s.traffic.used)} / ${fmtSize(s.traffic.limit)}`
+      : `${fmtSize(s.traffic.used)} / 无限`;
+  }
+  const maxDl = Math.max(1, ...s.chart.map(c => c.downloads));
+  const c = s.counts;
+  $('#view').innerHTML = `
+    ${s.traffic.quota_exceeded ? `
+    <div class="banner">
+      <div class="ic">🛑</div>
+      <div><div class="t">流量已达预设限额，下载服务已自动暂停</div>
+      <div class="d">所有公开下载请求都会被拦截。你可以在「设置」中调高限额，或点击下方按钮重置本月流量。</div></div>
+    </div>` : ''}
+    <div class="stat-grid">
+      <div class="stat-card glass">
+        <div class="label">📡 本月流量</div>
+        <div class="value">${fmtSize(s.traffic.used)}${s.traffic.limit>0?`<small>/ ${fmtSize(s.traffic.limit)}</small>`:'<small>无限</small>'}</div>
+        <div class="progress ${s.traffic.percent>=80?'hot':''}"><i style="width:${s.traffic.limit>0?Math.min(100,s.traffic.percent):3}%"></i></div>
+        <div class="foot">${s.traffic.limit>0?`已用 ${s.traffic.percent}% · 跨月自动重置`:'未设置限额'}</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="label">⬇️ 累计下载</div>
+        <div class="value">${c.downloads_total}</div>
+        <div class="foot">今日 ${c.downloads_today} 次 · ${fmtSize(c.bytes_today)}</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="label">📁 文件总数</div>
+        <div class="value">${c.files}</div>
+        <div class="foot">存储于 R2 对象存储</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="label">🔗 分享链接</div>
+        <div class="value">${c.shares}</div>
+        <div class="foot">有效 ${c.active_shares} 个 · 封禁 IP ${c.banned} 个</div>
+      </div>
+    </div>
+    <div class="glass section">
+      <div class="section-title"><h2>📊 近 14 天下载趋势</h2></div>
+      <div class="chart">
+        ${s.chart.map(d => `
+        <div class="col">
+          <div class="bar" style="height:${Math.max(3, Math.round(d.downloads/maxDl*112))}px">
+            <span>${d.downloads} 次 · ${fmtSize(d.bytes)}</span>
+          </div>
+          <div class="day">${d.day.slice(5).replace('-','/')}</div>
+        </div>`).join('')}
+      </div>
+    </div>
+    <div class="glass section">
+      <div class="section-title"><h2>🕘 最近下载</h2>
+        <button class="btn sm" id="goto-logs">查看全部</button></div>
+      ${s.recent.length ? `
+      <div style="overflow-x:auto"><table class="tbl">
+        <thead><tr><th>文件</th><th>IP</th><th>浏览器</th><th>系统</th><th>流量</th><th>时间</th></tr></thead>
+        <tbody>${s.recent.map(r => `
+          <tr>
+            <td class="name-cell">${ficon(r.file_name)} ${esc(r.file_name)}</td>
+            <td class="mono">${esc(r.ip)}</td>
+            <td>${esc(r.browser)}</td>
+            <td>${esc(r.os)}</td>
+            <td class="num">${fmtSize(r.bytes)}</td>
+            <td class="num">${fmtTime(r.created_at)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>` : `<div class="empty"><div class="icon">📥</div>还没有下载记录</div>`}
+    </div>`;
+  $('#goto-logs').onclick = () => switchTab('logs');
+}
+
+/* ═══════════ 文件 ═══════════ */
+async function loadFiles(){
+  const { files } = await api('/api/admin/files');
+  $('#view').innerHTML = `
+    <div class="dropzone" id="dropzone">
+      <div class="icon">☁️</div>
+      <div class="t">拖拽文件到此处，或点击上传</div>
+      <div class="d">单文件最大 100 MB（Workers 请求限制）· 直传 R2 对象存储</div>
+      <input type="file" id="file-input" multiple hidden>
+    </div>
+    <div id="upload-list"></div>
+    <div class="glass section">
+      <div class="section-title"><h2>📁 全部文件（${files.length}）</h2></div>
+      ${files.length ? `
+      <div style="overflow-x:auto"><table class="tbl">
+        <thead><tr><th style="width:44px"></th><th>文件名</th><th>大小</th><th>分享数</th><th>下载量</th><th>上传时间</th><th style="width:170px">操作</th></tr></thead>
+        <tbody>${files.map(f => `
+          <tr>
+            <td>${ficon(f.name)}</td>
+            <td class="name-cell" title="${esc(f.name)}">${esc(f.name)}</td>
+            <td class="num">${fmtSize(f.size)}</td>
+            <td class="num">${f.share_count}</td>
+            <td class="num">${f.download_count}</td>
+            <td class="num">${fmtTime(f.uploaded_at)}</td>
+            <td><div class="actions-cell">
+              <button class="btn sm primary" data-share="${f.id}" ${f.share_count?'':'data-new'}>创建分享</button>
+              <button class="btn sm danger" data-del="${f.id}" data-name="${esc(f.name)}">删除</button>
+            </div></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>` : `<div class="empty"><div class="icon">📭</div>还没有文件，上传一个试试</div>`}
+    </div>`;
+
+  const dz = $('#dropzone'), fi = $('#file-input');
+  dz.onclick = () => fi.click();
+  dz.ondragover = e => { e.preventDefault(); dz.classList.add('over'); };
+  dz.ondragleave = () => dz.classList.remove('over');
+  dz.ondrop = e => { e.preventDefault(); dz.classList.remove('over'); uploadFiles([...e.dataTransfer.files]); };
+  fi.onchange = () => { uploadFiles([...fi.files]); fi.value = ''; };
+
+  $$('[data-share]').forEach(b => b.onclick = () => openShareModal(b.dataset.share));
+  $$('[data-del]').forEach(b => b.onclick = async () => {
+    if(!(await confirmDialog('删除文件', `确定删除「${b.dataset.name}」？其所有分享链接和下载记录也会一并删除。`))) return;
+    await api(`/api/admin/files/${b.dataset.del}`, { method:'DELETE' });
+    toast('文件已删除');
+    loadFiles();
+  });
+}
+
+function uploadFiles(files){
+  for(const file of files){
+    if(file.size > 100 * 1024 * 1024){ toast(`「${file.name}」超过 100 MB 限制`, 'err'); continue; }
+    const item = document.createElement('div');
+    item.className = 'upload-item glass';
+    item.innerHTML = `${ficon(file.name)}<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(file.name)}</span>
+      <div class="prog"><i></i></div><span class="pct">0%</span>`;
+    $('#upload-list').prepend(item);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/admin/upload');
+    xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name));
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.upload.onprogress = e => {
+      const pct = Math.round(e.loaded / e.total * 100);
+      item.querySelector('.prog i').style.width = pct + '%';
+      item.querySelector('.pct').textContent = pct + '%';
+    };
+    xhr.onload = () => {
+      if(xhr.status === 201){ item.querySelector('.pct').textContent = '完成 ✅'; toast(`「${file.name}」上传成功`); loadFiles(); }
+      else { item.querySelector('.pct').textContent = '失败'; toast(`「${file.name}」上传失败`, 'err'); }
+    };
+    xhr.onerror = () => { item.querySelector('.pct').textContent = '失败'; toast(`「${file.name}」上传失败`, 'err'); };
+    xhr.send(file);
+  }
+}
+
+/* ═══════════ 创建分享弹窗 ═══════════ */
+function openShareModal(fileId){
+  openModal(`
+    <h3>创建分享链接</h3>
+    <div class="sub">生成公开下载链接，可设置有效期与下载次数上限</div>
+    <div class="field">
+      <label>有效期</label>
+      <select id="sh-exp" style="width:100%;padding:12px 14px;border-radius:14px;font-size:15px;font-family:inherit;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
+        <option value="0" style="color:#111">永久有效</option>
+        <option value="1" style="color:#111">1 小时</option>
+        <option value="24" style="color:#111">1 天</option>
+        <option value="168" style="color:#111">7 天</option>
+        <option value="720" style="color:#111">30 天</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>下载次数上限（留空或 0 = 不限）</label>
+      <input type="number" id="sh-max" min="0" placeholder="不限">
+      <div class="tip">达到上限后链接自动失效。单 IP 重复下载限制由「设置」统一控制。</div>
+    </div>
+    <div class="actions">
+      <button class="btn" data-x>取消</button>
+      <button class="btn primary" id="sh-create">生成链接</button>
+    </div>`);
+  $('[data-x]').onclick = closeModal;
+  $('#sh-create').onclick = async () => {
+    const exp = Number($('#sh-exp').value) || null;
+    const max = Number($('#sh-max').value) || null;
+    try{
+      const r = await api('/api/admin/shares', { method:'POST', body: JSON.stringify({ file_id: fileId, expires_hours: exp, max_downloads: max }) });
+      const url = location.origin + r.url;
+      openModal(`
+        <h3>分享链接已创建 ✨</h3>
+        <div class="sub">复制下面的链接发给需要的人</div>
+        <div class="link-box">
+          <input readonly value="${esc(url)}" id="sh-url" onclick="this.select()">
+          <button class="btn primary" id="sh-copy">复制</button>
+        </div>
+        <div class="actions">
+          <button class="btn" data-x>关闭</button>
+          <button class="btn primary" id="sh-open">预览分享页</button>
+        </div>`);
+      $('#sh-copy').onclick = () => copyText(url);
+      $('[data-x]').onclick = closeModal;
+      $('#sh-open').onclick = () => window.open(r.url, '_blank');
+    }catch(e){ toast(e.message, 'err'); }
+  };
+}
+
+/* ═══════════ 分享 ═══════════ */
+const STATUS_TEXT = { active:['active','有效'], expired:['expired','已过期'], revoked:['revoked','已撤销'], maxed:['maxed','已满额'] };
+async function loadShares(){
+  const { shares } = await api('/api/admin/shares');
+  $('#view').innerHTML = `
+    <div class="glass section">
+      <div class="section-title"><h2>🔗 分享链接（${shares.length}）</h2>
+        <button class="btn sm" id="cleanup-shares">清理失效分享</button></div>
+      ${shares.length ? `
+      <div style="overflow-x:auto"><table class="tbl">
+        <thead><tr><th>文件</th><th>链接</th><th>下载 / 上限</th><th>创建时间</th><th>有效期</th><th>状态</th><th style="width:80px">操作</th></tr></thead>
+        <tbody>${shares.map(s => `
+          <tr>
+            <td class="name-cell">${ficon(s.file_name)} ${esc(s.file_name)}</td>
+            <td class="mono"><a href="/s/${s.id}" target="_blank" style="color:#a5d8ff;text-decoration:none">/s/${s.id}</a></td>
+            <td class="num">${s.download_count} / ${s.max_downloads ?? '∞'}</td>
+            <td class="num">${fmtTime(s.created_at)}</td>
+            <td class="num">${s.expires_at ? fmtTime(s.expires_at) : '永久'}</td>
+            <td><span class="tag ${STATUS_TEXT[s.status][0]}"><i></i>${STATUS_TEXT[s.status][1]}</span></td>
+            <td><button class="btn sm danger" data-rv="${s.id}">撤销</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>` : `<div class="empty"><div class="icon">🔗</div>还没有分享链接，去「文件」页创建一个</div>`}
+    </div>`;
+  $('#cleanup-shares').onclick = async () => {
+    if(!(await confirmDialog('清理失效分享', '将删除所有已过期、已撤销、已达下载上限的分享链接。', false))) return;
+    const r = await api('/api/admin/shares/cleanup', { method:'POST' });
+    toast(`已清理 ${r.deleted} 条失效分享`);
+    loadShares();
+  };
+  $$('[data-rv]').forEach(b => b.onclick = async () => {
+    if(!(await confirmDialog('撤销分享', '撤销后该链接将立即失效，无法恢复。'))) return;
+    await api(`/api/admin/shares/${b.dataset.rv}`, { method:'DELETE' });
+    toast('分享已撤销');
+    loadShares();
+  });
+}
+
+/* ═══════════ 记录 ═══════════ */
+async function loadLogs(){
+  const q = encodeURIComponent(logsQuery);
+  const d = await api(`/api/admin/logs?page=${logsPage}&per_page=20&q=${q}`);
+  $('#view').innerHTML = `
+    <div class="glass section">
+      <div class="section-title"><h2>📜 下载记录（共 ${d.total} 条）</h2>
+        <div style="display:flex;gap:8px">
+          <input id="log-q" placeholder="搜索 IP / 文件名…" value="${esc(logsQuery)}"
+            style="padding:8px 14px;border-radius:12px;font-size:13px;font-family:inherit;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;width:180px">
+          <button class="btn sm" id="clear-30">清理 30 天前</button>
+          <button class="btn sm danger" id="clear-all">清空全部</button>
+        </div>
+      </div>
+      ${d.logs.length ? `
+      <div style="overflow-x:auto"><table class="tbl">
+        <thead><tr><th>文件</th><th>IP</th><th>国家</th><th>浏览器</th><th>系统</th><th>流量</th><th>时间</th></tr></thead>
+        <tbody>${d.logs.map(l => `
+          <tr>
+            <td class="name-cell" title="${esc(l.file_name)}">${ficon(l.file_name)} ${esc(l.file_name)}</td>
+            <td class="mono">${esc(l.ip)}</td>
+            <td>${esc(l.country || '—')}</td>
+            <td>${esc(l.browser)}</td>
+            <td>${esc(l.os)}</td>
+            <td class="num">${fmtSize(l.bytes)}</td>
+            <td class="num">${fmtTime(l.created_at)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>
+      <div class="pager">
+        <button class="btn sm" id="pg-prev" ${d.page<=1?'disabled':''}>‹ 上一页</button>
+        <span class="info">第 ${d.page} / ${d.pages} 页</span>
+        <button class="btn sm" id="pg-next" ${d.page>=d.pages?'disabled':''}>下一页 ›</button>
+      </div>` : `<div class="empty"><div class="icon">📜</div>${logsQuery ? '没有匹配的记录' : '还没有下载记录'}</div>`}
+    </div>`;
+  let t;
+  $('#log-q').oninput = e => { clearTimeout(t); t = setTimeout(() => { logsQuery = e.target.value.trim(); logsPage = 1; loadLogs(); }, 350); };
+  $('#pg-prev').onclick = () => { logsPage--; loadLogs(); };
+  $('#pg-next').onclick = () => { logsPage++; loadLogs(); };
+  $('#clear-30').onclick = async () => {
+    if(!(await confirmDialog('清理记录', '删除 30 天前的所有下载记录，以减少存储占用。'))) return;
+    const r = await api('/api/admin/logs?mode=older&days=30', { method:'DELETE' });
+    toast(`已清理 ${r.deleted} 条记录`); loadLogs();
+  };
+  $('#clear-all').onclick = async () => {
+    if(!(await confirmDialog('清空全部记录', '将删除所有下载记录（流量统计与分享计数不受影响）。此操作不可恢复。'))) return;
+    const r = await api('/api/admin/logs?mode=all', { method:'DELETE' });
+    toast(`已清空 ${r.deleted} 条记录`); loadLogs();
+  };
+}
+
+/* ═══════════ 封禁 ═══════════ */
+async function loadBans(){
+  const { bans } = await api('/api/admin/bans');
+  $('#view').innerHTML = `
+    <div class="glass section" style="margin-bottom:18px">
+      <div class="section-title"><h2>⛔ 手动封禁 IP</h2></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <input id="ban-ip" placeholder="IP 地址，如 1.2.3.4" class="mono"
+          style="flex:1;min-width:160px;padding:11px 14px;border-radius:14px;font-size:14px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
+        <input id="ban-reason" placeholder="原因（可选）"
+          style="flex:1;min-width:160px;padding:11px 14px;border-radius:14px;font-size:14px;font-family:inherit;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
+        <button class="btn primary" id="ban-add">封禁</button>
+      </div>
+      <div class="field" style="margin:12px 0 0"><div class="tip">重复下载超限的 IP 会被系统自动封禁（可在「设置」调整参数），此处可手动补充封禁。</div></div>
+    </div>
+    <div class="glass section">
+      <div class="section-title"><h2>🚫 封禁名单（${bans.length}）</h2></div>
+      ${bans.length ? `
+      <div style="overflow-x:auto"><table class="tbl">
+        <thead><tr><th>IP</th><th>原因</th><th>封禁时间</th><th>到期</th><th style="width:80px">操作</th></tr></thead>
+        <tbody>${bans.map(b => `
+          <tr>
+            <td class="mono">${esc(b.ip)}</td>
+            <td class="name-cell" title="${esc(b.reason)}">${esc(b.reason || '—')}</td>
+            <td class="num">${fmtTime(b.banned_at)}</td>
+            <td class="num">${b.expires_at ? fmtTime(b.expires_at) : '永久'}</td>
+            <td><button class="btn sm" data-unban="${esc(b.ip)}">解封</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>` : `<div class="empty"><div class="icon">✅</div>当前没有封禁任何 IP</div>`}
+    </div>`;
+  $('#ban-add').onclick = async () => {
+    const ip = $('#ban-ip').value.trim();
+    if(!ip) return toast('请输入 IP 地址', 'err');
+    try{
+      await api('/api/admin/bans', { method:'POST', body: JSON.stringify({ ip, reason: $('#ban-reason').value.trim() || undefined }) });
+      toast(`已封禁 ${ip}`); loadBans();
+    }catch(e){ toast(e.message, 'err'); }
+  };
+  $$('[data-unban]').forEach(b => b.onclick = async () => {
+    await api(`/api/admin/bans/${encodeURIComponent(b.dataset.unban)}`, { method:'DELETE' });
+    toast(`已解封 ${b.dataset.unban}`); loadBans();
+  });
+}
+
+/* ═══════════ 设置 ═══════════ */
+async function loadSettings(){
+  const s = await api('/api/admin/settings');
+  $('#view').innerHTML = `
+    <div class="glass group">
+      <div class="row">
+        <div class="info"><div class="t">站点名称</div><div class="d">显示在分享页和后台标题</div></div>
+        <input type="text" id="st-title" value="${esc(s.site_title)}" style="width:170px;text-align:left">
+      </div>
+    </div>
+    <div class="glass group">
+      <div class="row">
+        <div class="info"><div class="t">📡 月度流量限额（GB）</div>
+        <div class="d">本月已用 ${fmtSize(s.traffic_used_bytes)}。流量达到限额后，所有下载自动暂停，防止流量超额产生费用。设为 0 表示不限制，每月自动重置。</div></div>
+        <input type="number" id="st-limit" min="0" step="0.1" value="${s.traffic_limit_gb}">
+      </div>
+      <div class="row">
+        <div class="info"><div class="t">♻️ 重置本月流量</div><div class="d">将已用流量清零，立即恢复下载服务</div></div>
+        <button class="btn sm" id="st-reset-traffic">重置</button>
+      </div>
+    </div>
+    <div class="glass group">
+      <div class="row">
+        <div class="info"><div class="t">🔁 单 IP 最大下载次数</div>
+        <div class="d">同一 IP 在统计窗口内对同一资源最多可下载的次数，超出后拦截。设为 0 表示不限制。</div></div>
+        <input type="number" id="st-perip" min="0" value="${s.max_downloads_per_ip}">
+      </div>
+      <div class="row">
+        <div class="info"><div class="t">⏱️ 统计窗口（小时）</div><div class="d">统计单 IP 重复下载的时间范围。设为 0 表示永久累计。</div></div>
+        <input type="number" id="st-window" min="0" value="${s.count_window_hours}">
+      </div>
+      <div class="row">
+        <div class="info"><div class="t">🚫 超限自动封禁</div><div class="d">开启后，重复下载超限的 IP 会被自动加入封禁名单</div></div>
+        <label class="switch"><input type="checkbox" id="st-autoban" ${s.auto_ban?'checked':''}><span class="track"><span class="thumb"></span></span></label>
+      </div>
+      <div class="row">
+        <div class="info"><div class="t">⏳ 封禁时长（小时）</div><div class="d">自动封禁的持续时间，到期自动解封。设为 0 表示永久封禁直至手动解封。</div></div>
+        <input type="number" id="st-banhours" min="0" value="${s.ban_hours}">
+      </div>
+    </div>
+    <div class="glass group">
+      <div class="row">
+        <div class="info"><div class="t">🧹 清除下载记录</div><div class="d">删除下载明细以减少 D1 存储占用（流量统计与分享下载计数不受影响）</div></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn sm" id="st-clear-30">清理 30 天前</button>
+          <button class="btn sm danger" id="st-clear-all">清空全部</button>
+        </div>
+      </div>
+    </div>
+    <button class="btn primary" id="st-save" style="padding:14px 28px;font-size:15px;border-radius:18px">保存设置</button>`;
+
+  $('#st-reset-traffic').onclick = async () => {
+    if(!(await confirmDialog('重置流量', '将本月已用流量清零并立即恢复下载服务？', false))) return;
+    await api('/api/admin/traffic/reset', { method:'POST' });
+    toast('本月流量已重置');
+    loadSettings();
+  };
+  $('#st-clear-30').onclick = async () => {
+    if(!(await confirmDialog('清理记录', '删除 30 天前的所有下载记录？'))) return;
+    const r = await api('/api/admin/logs?mode=older&days=30', { method:'DELETE' });
+    toast(`已清理 ${r.deleted} 条记录`);
+  };
+  $('#st-clear-all').onclick = async () => {
+    if(!(await confirmDialog('清空全部记录', '删除所有下载记录？此操作不可恢复。'))) return;
+    const r = await api('/api/admin/logs?mode=all', { method:'DELETE' });
+    toast(`已清空 ${r.deleted} 条记录`);
+  };
+  $('#st-save').onclick = async () => {
+    const body = {
+      site_title: $('#st-title').value.trim(),
+      traffic_limit_gb: Number($('#st-limit').value) || 0,
+      max_downloads_per_ip: Number($('#st-perip').value) || 0,
+      count_window_hours: Number($('#st-window').value) || 0,
+      auto_ban: $('#st-autoban').checked,
+      ban_hours: Number($('#st-banhours').value) || 0,
+    };
+    await api('/api/admin/settings', { method:'PUT', body: JSON.stringify(body) });
+    toast('设置已保存');
+    loadSettings();
+  };
+}
+
+/* ═══════════ 启动 ═══════════ */
+(async () => {
+  try{
+    const s = await api('/api/admin/session');
+    siteTitle = s.site_title || siteTitle;
+    showApp();
+  }catch{
+    showLogin();
+  }
+})();
+</script>
+</body>
+</html>
