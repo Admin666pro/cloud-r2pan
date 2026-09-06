@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>分享 · Crystal Drive</title>
+<title>Crystal Drive</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -69,7 +69,6 @@ h1 { font-size: 21px; font-weight: 700; letter-spacing: -.02em; word-break: brea
 }
 .btn:hover { transform: translateY(-1px) scale(1.01); }
 .btn:active { transform: scale(.97); }
-.btn[disabled], btn.disabled { opacity: .45; cursor: not-allowed; transform: none !important; }
 .btn svg { width: 19px; height: 19px; }
 
 .hint { margin-top: 14px; font-size: 12.5px; color: rgba(255,255,255,.55); line-height: 1.6; }
@@ -85,6 +84,11 @@ h1 { font-size: 21px; font-weight: 700; letter-spacing: -.02em; word-break: brea
 .brand { position: fixed; bottom: max(22px, env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center;
   font-size: 13px; color: rgba(255,255,255,.4); letter-spacing: .08em; }
 .brand b { font-weight: 650; }
+.lang-btn { margin-left: 10px; padding: 4px 13px; border-radius: 11px; border: 1px solid rgba(255,255,255,.22);
+  background: rgba(255,255,255,.1); color: rgba(255,255,255,.75); font-size: 12px; font-family: inherit;
+  letter-spacing: 0; cursor: pointer; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  transition: all .2s; vertical-align: 1px; }
+.lang-btn:hover { background: rgba(255,255,255,.2); color: #fff; }
 </style>
 </head>
 <body>
@@ -93,13 +97,79 @@ h1 { font-size: 21px; font-weight: 700; letter-spacing: -.02em; word-break: brea
 <div class="card" id="app">
   <div class="loading">
     <div class="spinner"></div>
-    <div style="font-size:14px;color:rgba(255,255,255,.65)">正在加载分享信息…</div>
+    <div style="font-size:14px;color:rgba(255,255,255,.65)" id="loading-text"></div>
   </div>
 </div>
 
-<div class="brand" id="brand">Powered by <b>Crystal Drive</b></div>
+<div class="brand"><span id="brand-text">Powered by <b>Crystal Drive</b></span><button class="lang-btn" id="lang-toggle"></button></div>
 
 <script>
+/* ═══════════ i18n ═══════════ */
+const I18N = {
+  zh: {
+    pageTitle: '分享 · {site}',
+    loading: '正在加载分享信息…',
+    notFoundTitle: '链接不存在', notFoundMsg: '该分享链接无效，或已被管理员删除。',
+    goneTitle: '链接已失效', goneMsg: '该分享已被管理员撤销。',
+    expiredTitle: '链接已过期', expiredMsg: '该分享已超过有效期，无法继续下载。',
+    maxedTitle: '下载次数已达上限', maxedMsg: '该资源允许下载 {n} 次，名额已用完。',
+    downloads: '下载次数', limit: '次数上限', size: '文件大小',
+    download: '下载文件',
+    shared: '{d} 分享', expires: '{d} 到期',
+    quotaWarn: '⚠️ 本月流量已达预设限额，下载服务已临时暂停，请联系管理员。',
+    hint: '下载由 {site} 提供 · 请勿重复下载',
+    switchTo: 'EN',
+  },
+  en: {
+    pageTitle: 'Share · {site}',
+    loading: 'Loading share info…',
+    notFoundTitle: 'Link Not Found', notFoundMsg: 'This share link is invalid or has been removed.',
+    goneTitle: 'Link Revoked', goneMsg: 'This share has been revoked by the administrator.',
+    expiredTitle: 'Link Expired', expiredMsg: 'This share has expired and is no longer available.',
+    maxedTitle: 'Download Limit Reached', maxedMsg: 'This resource allows {n} downloads and the quota is used up.',
+    downloads: 'Downloads', limit: 'Limit', size: 'File Size',
+    download: 'Download',
+    shared: 'shared {d}', expires: 'expires {d}',
+    quotaWarn: '⚠️ Monthly traffic quota reached. Downloads are temporarily paused. Please contact the administrator.',
+    hint: 'Served by {site} · Please avoid duplicate downloads',
+    switchTo: '中文',
+  }
+};
+
+/** 语言检测：手动选择 > 浏览器首选语言 > 时区（大中华区） > 英文 */
+function detectLang(){
+  try {
+    const saved = localStorage.getItem('cd_lang');
+    if (saved === 'zh' || saved === 'en') return saved;
+  } catch {}
+  const first = String((navigator.languages && navigator.languages.length ? navigator.languages[0] : navigator.language) || '').toLowerCase();
+  if (first.startsWith('zh')) return 'zh';
+  if (first) return 'en';
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    if (/^Asia\/(Shanghai|Chongqing|Harbin|Urumqi|Kashgar|Hong_Kong|Macau|Taipei)$/.test(tz)) return 'zh';
+  } catch {}
+  return 'en';
+}
+
+let LANG = detectLang();
+const t = (key, params) => {
+  let s = (I18N[LANG] && I18N[LANG][key]) ?? I18N.en[key] ?? key;
+  if (params) for (const k in params) s = s.split('{' + k + '}').join(params[k]);
+  return s;
+};
+
+document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+$('#loading-text').textContent = t('loading');
+$('#lang-toggle').textContent = t('switchTo');
+$('#lang-toggle').onclick = () => {
+  try { localStorage.setItem('cd_lang', LANG === 'zh' ? 'en' : 'zh'); } catch {}
+  location.reload();
+};
+
+function $(s){ return document.querySelector(s); }
+
+/* ═══════════ 工具 ═══════════ */
 const EXT_COLORS = {
   zip:'#ffb340', rar:'#ffb340', '7z':'#ffb340', tar:'#ffb340', gz:'#ffb340',
   pdf:'#ff6961', doc:'#5b9cf5', docx:'#5b9cf5', txt:'#9aa4b2', md:'#9aa4b2',
@@ -132,50 +202,48 @@ async function boot(){
     const r = await fetch(`/s/${token}/info`, {cache:'no-store'});
     if(!r.ok) throw 0;
     info = await r.json();
-  }catch{ renderError('链接不存在','该分享链接无效，或已被管理员删除。'); return; }
-  if(document.getElementById('brand') && info.site_title){
-    document.getElementById('brand').innerHTML = `Powered by <b>${esc(info.site_title)}</b>`;
-    document.title = `${info.name} · ${info.site_title}`;
-  }
-  render(info);
+  }catch{ renderError(t('notFoundTitle'), t('notFoundMsg')); return; }
+  const siteName = info.site_title || 'Crystal Drive';
+  document.title = t('pageTitle', {site: siteName});
+  $('#brand-text').innerHTML = `Powered by <b>${esc(siteName)}</b>`;
+  render(info, siteName);
 }
 
 function renderError(title,msg){
-  document.getElementById('app').innerHTML = `
+  $('#app').innerHTML = `
     <div class="file-icon" style="font-size:44px">🚫</div>
     <h1>${esc(title)}</h1>
     <div class="hint" style="margin-top:12px">${esc(msg)}</div>`;
 }
 
-function render(d){
+function render(d, siteName){
   const ext = extOf(d.name);
   const gone = {
-    gone:['链接已失效','该分享已被管理员撤销。'],
-    expired:['链接已过期','该分享已超过有效期，无法继续下载。'],
-    maxed:['下载次数已达上限',`该资源允许下载 ${d.max_downloads} 次，名额已用完。`]
+    gone:[t('goneTitle'), t('goneMsg')],
+    expired:[t('expiredTitle'), t('expiredMsg')],
+    maxed:[t('maxedTitle'), t('maxedMsg', {n: d.max_downloads})]
   }[d.status];
   if(gone){ renderError(gone[0],gone[1]); return; }
 
-  document.getElementById('app').innerHTML = `
+  $('#app').innerHTML = `
     <div class="file-icon"><span class="ext" style="color:${extColor(d.name)}">${esc((ext||'FILE').toUpperCase())}</span></div>
     <h1>${esc(d.name)}</h1>
     <div class="meta">
       <span>${fmtSize(d.size)}</span>
-      <span class="dot"></span>
-      <span>${fmtTime(d.created_at)} 分享</span>
-      ${d.expires_at?`<span class="dot"></span><span>${fmtTime(d.expires_at)} 到期</span>`:''}
+      ${d.expires_at?`<span class="dot"></span><span>${esc(t('shared',{d:fmtTime(d.created_at)}))}</span><span class="dot"></span><span>${esc(t('expires',{d:fmtTime(d.expires_at)}))}</span>`
+        :`<span class="dot"></span><span>${esc(t('shared',{d:fmtTime(d.created_at)}))}</span>`}
     </div>
     <div class="stats">
-      <div class="stat"><div class="v">${d.downloads}</div><div class="k">下载次数</div></div>
-      <div class="stat"><div class="v">${d.max_downloads??'∞'}</div><div class="k">次数上限</div></div>
-      <div class="stat"><div class="v">${fmtSize(d.size)}</div><div class="k">文件大小</div></div>
+      <div class="stat"><div class="v">${d.downloads}</div><div class="k">${esc(t('downloads'))}</div></div>
+      <div class="stat"><div class="v">${d.max_downloads??'∞'}</div><div class="k">${esc(t('limit'))}</div></div>
+      <div class="stat"><div class="v">${fmtSize(d.size)}</div><div class="k">${esc(t('size'))}</div></div>
     </div>
-    ${d.quota_exceeded?`<div class="warn">⚠️ 本月流量已达预设限额，下载服务已临时暂停，请联系管理员。</div>`:''}
+    ${d.quota_exceeded?`<div class="warn">${esc(t('quotaWarn'))}</div>`:''}
     <a class="btn" id="dl" href="/s/${token}/download" ${d.quota_exceeded?'style="pointer-events:none;opacity:.45"':''}>
       <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4 20h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      下载文件
+      ${esc(t('download'))}
     </a>
-    <div class="hint">下载由 ${esc(d.site_title||'Crystal Drive')} 提供 · 请勿重复下载</div>`;
+    <div class="hint">${esc(t('hint', {site: siteName}))}</div>`;
 }
 
 boot();

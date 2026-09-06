@@ -1,7 +1,6 @@
 import adminHTML from "../public/admin.html";
 import shareHTML from "../public/share.html";
-import type { Env } from "./types";
-import { getSettings } from "./settings";
+import { pickLang, type L10n } from "./i18n";
 
 export function serveAdminPage(): Response {
   return new Response(adminHTML, {
@@ -21,13 +20,15 @@ function esc(s: string): string {
   );
 }
 
-/** iOS 26 液态玻璃风格的错误/状态页（封禁、过期、限额等） */
-export async function errorPage(
+/** iOS 26 液态玻璃风格的错误/状态页（封禁、过期、限额等），文案跟随访客语言 */
+export function errorPage(
+  req: Request,
   status: number,
-  title: string,
-  message: string,
+  title: L10n,
+  message: L10n,
   opts: { siteTitle?: string } = {}
-): Promise<Response> {
+): Response {
+  const lang = pickLang(req);
   const site = esc(opts.siteTitle ?? "Crystal Drive");
   const icons: Record<number, string> = {
     403: "🚫",
@@ -37,11 +38,11 @@ export async function errorPage(
     503: "🛑",
   };
   const html = `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${lang === "zh" ? "zh-CN" : "en"}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>${esc(title)} · ${site}</title>
+<title>${esc(title[lang])} · ${site}</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { height: 100%; }
@@ -83,8 +84,8 @@ p { font-size: 15px; line-height: 1.65; color: rgba(255,255,255,.78); }
 <div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>
 <div class="card">
   <div class="icon">${icons[status] ?? "⚠️"}</div>
-  <h1>${esc(title)}</h1>
-  <p>${esc(message)}</p>
+  <h1>${esc(title[lang])}</h1>
+  <p>${esc(message[lang])}</p>
   <div class="code">HTTP ${status}</div>
 </div>
 <div class="brand">Powered by ${site}</div>
