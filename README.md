@@ -1,4 +1,4 @@
-# Crystal Drive
+# cloud-r2pan
 
 iOS 26 液态玻璃风格网盘分享系统，基于 **Cloudflare Workers + R2 + D1** 构建。
 支持文件上传、分享链接（有效期/次数/访问密码）、流量限额、单 IP 限流与自动封禁、下载日志、中英双语。
