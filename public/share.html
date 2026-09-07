@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Crystal Drive</title>
+<title>cloud-r2pan</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -114,7 +114,7 @@ h1 { font-size: 21px; font-weight: 700; letter-spacing: -.02em; word-break: brea
   </div>
 </div>
 
-<div class="brand"><span id="brand-text">Powered by <b>Crystal Drive</b></span><button class="lang-btn" id="lang-toggle"></button></div>
+<div class="brand"><span id="brand-text">Powered by <b>cloud-r2pan</b></span><button class="lang-btn" id="lang-toggle"></button></div>
 
 <script>
 /* ═══════════ i18n ═══════════ */
@@ -224,7 +224,7 @@ async function boot(){
     if(!r.ok) throw 0;
     info = await r.json();
   }catch{ renderError(t('notFoundTitle'), t('notFoundMsg')); return; }
-  const siteName = info.site_title || 'Crystal Drive';
+  const siteName = info.site_title || 'cloud-r2pan';
   document.title = t('pageTitle', {site: siteName});
   $('#brand-text').innerHTML = `Powered by <b>${esc(siteName)}</b>`;
   render(info, siteName);

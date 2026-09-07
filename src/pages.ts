@@ -29,7 +29,7 @@ export function errorPage(
   opts: { siteTitle?: string } = {}
 ): Response {
   const lang = pickLang(req);
-  const site = esc(opts.siteTitle ?? "Crystal Drive");
+  const site = esc(opts.siteTitle ?? "cloud-r2pan");
   const icons: Record<number, string> = {
     403: "🚫",
     404: "🔍",

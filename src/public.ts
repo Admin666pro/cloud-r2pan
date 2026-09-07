@@ -26,7 +26,7 @@ function parseRange(header: string | null, size: number): { offset: number; leng
 
 /* ═══════════ 分享密码 & 下载授权令牌 ═══════════
  * 密码存储为加盐 SHA-256（salt:sha256(salt:password)）；下载授权用 HMAC 签名携带过期时间，
- * 避免把明文密码拼进下载 URL。HMAC 密钥复用 ADMIN_KEY，无需新增 Secret，密钥轮换时短时令牌即失效。
+ * 避免把明文密码拼进下载 URL。HMAC 密钥复用 admin，无需新增 Secret，密钥轮换时短时令牌即失效。
  */
 /** 加盐与密码哈希串（salt:hashhex） */
 export async function hashPassword(password: string): Promise<string> {
@@ -72,7 +72,7 @@ async function sha256Hex(data: string): Promise<string> {
 async function hmac(env: Env, msg: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(env.ADMIN_KEY),
+    new TextEncoder().encode(env.admin),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
@@ -114,7 +114,7 @@ export async function handleShareInfo(req: Request, env: Env, token: string): Pr
 }
 
 async function getShare(env: Env, token: string): Promise<ShareWithFile | null> {
-  return await env.DB.prepare(
+  return await env.db.prepare(
     `SELECT s.id, s.file_id, s.created_at, s.expires_at, s.max_downloads, s.download_count, s.revoked, s.password_hash,
             f.key, f.name, f.size, f.mime
      FROM shares s JOIN files f ON f.id = s.file_id
@@ -152,14 +152,14 @@ export async function handleDownload(
   const country = req.headers.get("cf-ipcountry") ?? "";
 
   // 1. 封禁检查（过期自动解封）
-  const ban = await env.DB.prepare(
+  const ban = await env.db.prepare(
     "SELECT reason, expires_at FROM banned_ips WHERE ip = ?1"
   )
     .bind(ip)
     .first<{ reason: string | null; expires_at: number | null }>();
   if (ban) {
     if (ban.expires_at && ban.expires_at < Date.now()) {
-      await env.DB.prepare("DELETE FROM banned_ips WHERE ip = ?1").bind(ip).run();
+      await env.db.prepare("DELETE FROM banned_ips WHERE ip = ?1").bind(ip).run();
     } else {
       return errorPage(
         req,
@@ -238,7 +238,7 @@ export async function handleDownload(
     const since =
       settings.countWindowHours > 0 ? Date.now() - settings.countWindowHours * 3600_000 : 0;
     const { c } =
-      (await env.DB.prepare(
+      (await env.db.prepare(
         "SELECT COUNT(*) AS c FROM download_logs WHERE share_id = ?1 AND ip = ?2 AND created_at > ?3"
       )
         .bind(token, ip, since)
@@ -247,7 +247,7 @@ export async function handleDownload(
       if (settings.autoBan) {
         const expiresAt =
           settings.banHours > 0 ? Date.now() + settings.banHours * 3600_000 : null;
-        await env.DB.prepare(
+        await env.db.prepare(
           `INSERT INTO banned_ips(ip, reason, banned_at, expires_at) VALUES(?1, ?2, ?3, ?4)
            ON CONFLICT(ip) DO UPDATE SET reason = excluded.reason, banned_at = excluded.banned_at, expires_at = excluded.expires_at`
         )
@@ -280,7 +280,7 @@ export async function handleDownload(
   const range = parseRange(req.headers.get("range"), row.size);
   let obj: R2ObjectBody;
   try {
-    obj = (await env.BUCKET.get(row.key, range ? { range } : undefined)) as R2ObjectBody;
+    obj = (await env.r2.get(row.key, range ? { range } : undefined)) as R2ObjectBody;
   } catch {
     return errorPage(
       req,
@@ -318,12 +318,12 @@ export async function handleDownload(
   ctx.waitUntil(
     (async () => {
       const { browser, os } = parseUA(ua);
-      await env.DB.batch([
-        env.DB.prepare(
+      await env.db.batch([
+        env.db.prepare(
           `INSERT INTO download_logs(share_id, file_id, file_name, ip, ua, browser, os, country, bytes, created_at)
            VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
         ).bind(token, row.file_id, row.name, ip, ua.slice(0, 500), browser, os, country, bytes, Date.now()),
-        env.DB.prepare("UPDATE shares SET download_count = download_count + 1 WHERE id = ?1").bind(token),
+        env.db.prepare("UPDATE shares SET download_count = download_count + 1 WHERE id = ?1").bind(token),
       ]);
       await addTraffic(env, settings, bytes);
     })()

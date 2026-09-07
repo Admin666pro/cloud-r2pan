@@ -56,8 +56,8 @@ export async function handleAdminApi(
     const ip = clientIp(req);
     if (!rateLimitLogin(ip))
       return json({ error: msg(req, "尝试过于频繁，请稍后再试", "Too many attempts. Please try again later.") }, 429);
-    if (!env.ADMIN_KEY)
-      return json({ error: msg(req, "未设置 ADMIN_KEY 密钥，请先执行 npx wrangler secret put ADMIN_KEY", "ADMIN_KEY is not set. Run: npx wrangler secret put ADMIN_KEY") }, 500);
+    if (!env.admin)
+      return json({ error: msg(req, "未设置 admin 密钥，请先执行 npx wrangler secret put admin", "admin is not set. Run: npx wrangler secret put admin") }, 500);
     const body = await readJson<{ key: string }>(req);
     if (!body.key || !(await checkAdminKey(env, body.key))) {
       return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
@@ -102,24 +102,24 @@ export async function handleAdminApi(
     }
     const [files, shares, activeShares, totalDownloads, todayStat, chartRows, recent, banned] =
       await Promise.all([
-        env.DB.prepare("SELECT COUNT(*) AS c FROM files").first<{ c: number }>(),
-        env.DB.prepare("SELECT COUNT(*) AS c FROM shares").first<{ c: number }>(),
-        env.DB.prepare(
+        env.db.prepare("SELECT COUNT(*) AS c FROM files").first<{ c: number }>(),
+        env.db.prepare("SELECT COUNT(*) AS c FROM shares").first<{ c: number }>(),
+        env.db.prepare(
           "SELECT COUNT(*) AS c FROM shares WHERE revoked = 0 AND (expires_at IS NULL OR expires_at > ?1) AND (max_downloads IS NULL OR download_count < max_downloads)"
         )
           .bind(Date.now())
           .first<{ c: number }>(),
-        env.DB.prepare("SELECT COALESCE(SUM(downloads), 0) AS c FROM traffic_stats").first<{ c: number }>(),
-        env.DB.prepare("SELECT bytes, downloads FROM traffic_stats WHERE day = ?1")
+        env.db.prepare("SELECT COALESCE(SUM(downloads), 0) AS c FROM traffic_stats").first<{ c: number }>(),
+        env.db.prepare("SELECT bytes, downloads FROM traffic_stats WHERE day = ?1")
           .bind(new Date().toISOString().slice(0, 10))
           .first<{ bytes: number; downloads: number }>(),
-        env.DB.prepare(
+        env.db.prepare(
           "SELECT day, bytes, downloads FROM traffic_stats WHERE day >= date('now', '-13 days') ORDER BY day"
         ).all<{ day: string; bytes: number; downloads: number }>(),
-        env.DB.prepare(
+        env.db.prepare(
           "SELECT file_name, ip, browser, os, country, bytes, created_at FROM download_logs ORDER BY id DESC LIMIT 10"
         ).all(),
-        env.DB.prepare("SELECT COUNT(*) AS c FROM banned_ips").first<{ c: number }>(),
+        env.db.prepare("SELECT COUNT(*) AS c FROM banned_ips").first<{ c: number }>(),
       ]);
 
     // 补齐 14 天（无数据的天补 0）
@@ -159,7 +159,7 @@ export async function handleAdminApi(
 
   // ── 文件列表 ──────────────────────────────────────
   if (path === "/api/admin/files" && method === "GET") {
-    const { results } = await env.DB.prepare(
+    const { results } = await env.db.prepare(
       `SELECT f.id, f.name, f.size, f.mime, f.uploaded_at,
               (SELECT COUNT(*) FROM shares s WHERE s.file_id = f.id) AS share_count,
               (SELECT COALESCE(SUM(s.download_count), 0) FROM shares s WHERE s.file_id = f.id) AS download_count
@@ -182,10 +182,10 @@ export async function handleAdminApi(
     const id = randomId(14);
     const key = `files/${id}`;
     const mime = req.headers.get("content-type") || "application/octet-stream";
-    const obj = await env.BUCKET.put(key, req.body, {
+    const obj = await env.r2.put(key, req.body, {
       httpMetadata: { contentType: mime, contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(name)}` },
     });
-    await env.DB.prepare(
+    await env.db.prepare(
       "INSERT INTO files(id, key, name, size, mime, uploaded_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6)"
     )
       .bind(id, key, name, obj.size, mime, Date.now())
@@ -197,14 +197,14 @@ export async function handleAdminApi(
   const fileMatch = /^\/api\/admin\/files\/([^/]+)$/.exec(path);
   if (fileMatch && method === "DELETE") {
     const fileId = fileMatch[1];
-    const file = await env.DB.prepare("SELECT key FROM files WHERE id = ?1").bind(fileId).first<{ key: string }>();
+    const file = await env.db.prepare("SELECT key FROM files WHERE id = ?1").bind(fileId).first<{ key: string }>();
     if (!file) return json({ error: msg(req, "文件不存在", "File not found") }, 404);
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM shares WHERE file_id = ?1").bind(fileId),
-      env.DB.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(fileId),
-      env.DB.prepare("DELETE FROM files WHERE id = ?1").bind(fileId),
+    await env.db.batch([
+      env.db.prepare("DELETE FROM shares WHERE file_id = ?1").bind(fileId),
+      env.db.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(fileId),
+      env.db.prepare("DELETE FROM files WHERE id = ?1").bind(fileId),
     ]);
-    ctx.waitUntil(env.BUCKET.delete(file.key));
+    ctx.waitUntil(env.r2.delete(file.key));
     return json({ ok: true });
   }
 
@@ -212,7 +212,7 @@ export async function handleAdminApi(
   if (path === "/api/admin/shares" && method === "POST") {
     const body = await readJson<{ file_id: string; expires_hours: number | null; max_downloads: number | null; password: string | null }>(req);
     if (!body.file_id) return json({ error: msg(req, "缺少 file_id", "Missing file_id") }, 400);
-    const file = await env.DB.prepare("SELECT id FROM files WHERE id = ?1").bind(body.file_id).first();
+    const file = await env.db.prepare("SELECT id FROM files WHERE id = ?1").bind(body.file_id).first();
     if (!file) return json({ error: msg(req, "文件不存在", "File not found") }, 404);
     const expiresAt =
       body.expires_hours && body.expires_hours > 0 ? Date.now() + body.expires_hours * 3600_000 : null;
@@ -222,7 +222,7 @@ export async function handleAdminApi(
       typeof body.password === "string" && body.password.trim() ? body.password.trim() : null;
     const passwordHash = password ? await hashPassword(password) : null;
     const id = randomId(10);
-    await env.DB.prepare(
+    await env.db.prepare(
       "INSERT INTO shares(id, file_id, created_at, expires_at, max_downloads, password_hash) VALUES(?1, ?2, ?3, ?4, ?5, ?6)"
     )
       .bind(id, body.file_id, Date.now(), expiresAt, maxDownloads, passwordHash)
@@ -232,7 +232,7 @@ export async function handleAdminApi(
 
   // ── 分享列表 ──────────────────────────────────────
   if (path === "/api/admin/shares" && method === "GET") {
-    const { results } = await env.DB.prepare(
+    const { results } = await env.db.prepare(
       `SELECT s.id, s.file_id, s.created_at, s.expires_at, s.max_downloads, s.download_count, s.revoked,
               s.password_hash, f.name AS file_name, f.size AS file_size
        FROM shares s JOIN files f ON f.id = s.file_id
@@ -257,7 +257,7 @@ export async function handleAdminApi(
   // ── 清理失效分享（过期 / 已撤销 / 达上限） ────────
   if (path === "/api/admin/shares/cleanup" && method === "POST") {
     const now = Date.now();
-    const r = await env.DB.prepare(
+    const r = await env.db.prepare(
       "DELETE FROM shares WHERE revoked = 1 OR (expires_at IS NOT NULL AND expires_at < ?1) OR (max_downloads IS NOT NULL AND download_count >= max_downloads)"
     )
       .bind(now)
@@ -268,7 +268,7 @@ export async function handleAdminApi(
   // ── 撤销/删除分享 ─────────────────────────────────
   const shareMatch = /^\/api\/admin\/shares\/([^/]+)$/.exec(path);
   if (shareMatch && method === "DELETE") {
-    const r = await env.DB.prepare("DELETE FROM shares WHERE id = ?1").bind(shareMatch[1]).run();
+    const r = await env.db.prepare("DELETE FROM shares WHERE id = ?1").bind(shareMatch[1]).run();
     if ((r.meta.changes ?? 0) === 0) return json({ error: msg(req, "分享不存在", "Share not found") }, 404);
     return json({ ok: true });
   }
@@ -286,10 +286,10 @@ export async function handleAdminApi(
     }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const [total, rows] = await Promise.all([
-      env.DB.prepare(`SELECT COUNT(*) AS c FROM download_logs ${whereSql}`)
+      env.db.prepare(`SELECT COUNT(*) AS c FROM download_logs ${whereSql}`)
         .bind(...binds)
         .first<{ c: number }>(),
-      env.DB.prepare(
+      env.db.prepare(
         `SELECT id, share_id, file_name, ip, browser, os, country, bytes, created_at
          FROM download_logs ${whereSql} ORDER BY id DESC LIMIT ?${binds.length + 1} OFFSET ?${binds.length + 2}`
       )
@@ -317,13 +317,13 @@ export async function handleAdminApi(
     } else {
       sql = "DELETE FROM download_logs";
     }
-    const r = await env.DB.prepare(sql).bind(...binds).run();
+    const r = await env.db.prepare(sql).bind(...binds).run();
     return json({ ok: true, deleted: r.meta.changes ?? 0 });
   }
 
   // ── 封禁列表 ──────────────────────────────────────
   if (path === "/api/admin/bans" && method === "GET") {
-    const { results } = await env.DB.prepare(
+    const { results } = await env.db.prepare(
       "SELECT ip, reason, banned_at, expires_at FROM banned_ips ORDER BY banned_at DESC"
     ).all();
     return json({ bans: results ?? [] });
@@ -335,7 +335,7 @@ export async function handleAdminApi(
     const ip = body.ip?.trim();
     if (!ip || !/^[0-9a-fA-F:.]{3,45}$/.test(ip)) return json({ error: msg(req, "IP 格式无效", "Invalid IP format") }, 400);
     const expiresAt = body.hours && body.hours > 0 ? Date.now() + body.hours * 3600_000 : null;
-    await env.DB.prepare(
+    await env.db.prepare(
       `INSERT INTO banned_ips(ip, reason, banned_at, expires_at) VALUES(?1, ?2, ?3, ?4)
        ON CONFLICT(ip) DO UPDATE SET reason = excluded.reason, banned_at = excluded.banned_at, expires_at = excluded.expires_at`
     )
@@ -347,7 +347,7 @@ export async function handleAdminApi(
   // ── 解封 ──────────────────────────────────────────
   const banMatch = /^\/api\/admin\/bans\/([^/]+)$/.exec(path);
   if (banMatch && method === "DELETE") {
-    await env.DB.prepare("DELETE FROM banned_ips WHERE ip = ?1").bind(decodeURIComponent(banMatch[1])).run();
+    await env.db.prepare("DELETE FROM banned_ips WHERE ip = ?1").bind(decodeURIComponent(banMatch[1])).run();
     return json({ ok: true });
   }
 

@@ -67,10 +67,10 @@ let schemaReady = false;
 export async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
   // 逐条执行 DDL（D1 exec 对多行多语句解析不稳定，batch 更可靠）
-  await env.DB.batch(SCHEMA_STATEMENTS.map((sql) => env.DB.prepare(sql)));
+  await env.db.batch(SCHEMA_STATEMENTS.map((sql) => env.db.prepare(sql)));
   // 迁移：旧库补 password_hash 列（若已存在则静默跳过）
   try {
-    await env.DB.prepare("ALTER TABLE shares ADD COLUMN password_hash TEXT").run();
+    await env.db.prepare("ALTER TABLE shares ADD COLUMN password_hash TEXT").run();
   } catch {
     /* 列已存在或重复添加，忽略 */
   }

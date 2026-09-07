@@ -1,7 +1,7 @@
 export interface Env {
-  BUCKET: R2Bucket;
-  DB: D1Database;
-  ADMIN_KEY: string;
+  r2: R2Bucket;
+  db: D1Database;
+  admin: string;
 }
 
 export interface ShareRow {

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Crystal Drive</title>
+<title>cloud-r2pan</title>
 <style>
 :root {
   --glass: rgba(255,255,255,.09);
@@ -324,7 +324,7 @@ const I18N = {
     copied: '已复制到剪贴板', save: '保存设置', saved: '设置已保存', forever: '永久',
     switchTo: 'EN', topbarSub: '管理后台 · Cloudflare Workers + R2',
     // 登录
-    loginSubtitle: '管理后台 · 请输入管理密钥登录', keyPlaceholder: '管理密钥 (ADMIN_KEY)',
+    loginSubtitle: '管理后台 · 请输入管理密钥登录', keyPlaceholder: '管理密钥 (admin)',
     // 标签
     tabOverview: '概览', tabFiles: '文件', tabShares: '分享', tabLogs: '记录', tabBans: '封禁', tabSettings: '设置',
     // 概览
@@ -400,7 +400,7 @@ const I18N = {
     copied: 'Copied to clipboard', save: 'Save Settings', saved: 'Settings saved', forever: 'Forever',
     switchTo: '中文', topbarSub: 'Admin console · Cloudflare Workers + R2',
     // 登录
-    loginSubtitle: 'Admin console · Enter your admin key to continue', keyPlaceholder: 'Admin key (ADMIN_KEY)',
+    loginSubtitle: 'Admin console · Enter your admin key to continue', keyPlaceholder: 'Admin key (admin)',
     // 标签
     tabOverview: 'Overview', tabFiles: 'Files', tabShares: 'Shares', tabLogs: 'Logs', tabBans: 'Bans', tabSettings: 'Settings',
     // 概览
@@ -580,7 +580,7 @@ function openModal(html){
 function closeModal(){ $('#modal')?.remove(); }
 
 /* ═══════════ 登录视图 ═══════════ */
-let siteTitle = 'Crystal Drive';
+let siteTitle = 'cloud-r2pan';
 function showLogin(){
   document.title = t('docTitle', {site: siteTitle});
   $('#app').innerHTML = `
