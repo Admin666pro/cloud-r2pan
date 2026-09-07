@@ -3,117 +3,56 @@
 iOS 26 液态玻璃风格网盘分享系统，基于 **Cloudflare Workers + R2 + D1**。
 支持文件上传、分享链接（有效期/次数/访问密码）、流量限额、单 IP 限流与自动封禁、下载日志、中英双语。
 
-> 隐私说明：真实的 D1 数据库 ID 通过**环境变量注入**，不会写进本仓库。任何人 clone 你的仓库都拿不到你的敏感 ID。
+> 隐私说明：`wrangler.jsonc` **不声明** R2/D1 绑定，真实 `database_id` 只在 Cloudflare 控制台里自动管理。克隆仓库拿不到任何敏感 ID，部署也不需要填 database\_id。
 
 ***
 
-## 一、绑定名称（代码里直接用，勿改）
+## 一、绑定名称（在 Cloudflare 控制台手动配置，勿改名）
 
-| 绑定名     | 类型           | 资源名           | 作用                |
-| ------- | ------------ | ------------- | ----------------- |
-| `r2`    | R2 Bucket    | `cloud-r2pan` | 存储上传的文件对象         |
-| `db`    | D1 Database  | `cloud-r2pan` | 元数据、分享、日志、配置、流量统计 |
-| `admin` | Secret（环境变量） | —             | 管理后台登录密钥          |
+Worker → **Settings → Bindings** 手动添加：
 
-- Worker 名称：`cloud-r2pan`；入口：`src/index.ts`。
+| 绑定名     | 类型          | 资源名/值         | 作用           |
+| ------- | ----------- | ------------- | ------------ |
+| `r2`    | R2 Bucket   | `cloud-r2pan` | 存储上传的文件      |
+| `db`    | D1 Database | `cloud-r2pan` | 元数据、分享、日志、配置 |
+| `admin` | Secret 密钥   | 你的管理密码        | 管理后台登录密钥     |
 
-- Worker 发送所有网络请求，依赖以上三个绑定。
+> Worker 名称：`cloud-r2pan`；入口：`src/index.ts`。
 
 ***
 
-## 二、部署（二选一）
+## 二、部署步骤（全程不用手写 database\_id）
 
-> 推荐用**网页手动部署**：在浏览器里下拉选择资源，全程不用手写数据库 ID。
+因为绑定放在网页手动管理，部署分两步，都很简单。
 
-### 方式 A：网页手动部署（不手写 ID，推荐）
+### ① 建资源 + 加绑定（浏览器里一次搞定）
 
-全部在 [Cloudflare 控制台](https://dash.cloudflare.com) 完成，适合不想碰命令行序列、或想直观管理资源的人。
+1. 建 **R2 存储桶**：控制台 → **R2** → **Create bucket** → 名称 `cloud-r2pan`。
+2. 建 **D1 数据库**：控制台 → **D1** → **Create database** → 名称 `cloud-r2pan`。
+3. 建并配置 **Worker**：控制台 → **Workers & Pages** → **Create** → **Worker** → 名称 `cloud-r2pan`。
+   进入该 Worker → **Settings** → **Bindings** → **Add binding**：
 
-**1. 创建 R2 存储桶**
-左侧菜单 → **R2** → **Create bucket** → 名称填 `cloud-r2pan` → **Create bucket**。
+   - **R2 Bucket**：Variable name 填 `r2`，bucket 下拉选 `cloud-r2pan`。
 
-**2. 创建 D1 数据库**
-左侧菜单 → **D1** → **Create database** → 名称填 `cloud-r2pan` → **Create**。
+   - **D1 Database**：Variable name 填 `db`，数据库下拉选 `cloud-r2pan`（**ID 由页面自动填，不用你抄**）。
+4. **Settings → Variables and Secrets** → **Add → Secret**：Variable name 填 `admin`，值填你的管理密码。
 
-**3. 创建 Worker**
-左侧菜单 → **Workers & Pages** → **Create** → **Worker** → 名称填 `cloud-r2pan` → **Deploy**。
+### ② 上传代码（本地执行，无需任何 ID）
 
-**4. 添加绑定（Bindings）**
-进入该 Worker → **Settings** → **Bindings** → **Add binding**：
-
-- 添加 **R2 Bucket**：**Variable name** 填 `r2`，R2 bucket 下拉选 `cloud-r2pan`。
-
-- 添加 **D1 Database**：**Variable name** 填 `db`，数据库**下拉选** **`cloud-r2pan`**（ID 由页面自动填，不用你手抄）。
-
-**5. 设置管理密钥**
-**Settings** → **Variables and Secrets** → **Add** → **Secret**：Variable name 填 `admin`，值填你的管理密码 → **Deploy**。
-
-**6. 上传代码（网页版最后一步）**
-网页编辑器编不了 TypeScript + `.html` 模块工程，代码需要在本地部署一次（只需一次，后面改代码也用它）：
+网页编辑器编不了 TypeScript + `.html` 工程，代码用本机一次命令部署（改代码后重复这条即可）：
 
 ```bash
 npm install
+npm run deploy      # 上传代码版本，不含绑定声明，因此不需要 database_id
 ```
 
-在项目根目录新建 `.env`，填入你建 D1 数据库时看到的 `database_id`：
+部署即成功，不再出现 `10021` 报错。
 
-```env
-D1_DATABASE_ID="你的database_id"
-```
+### 访问
 
-然后：
+- 管理后台：`https://cloud-r2pan.<你的账号>.workers.dev/admin`（用 `admin` 密钥登录）
 
-```bash
-npm run deploy
-```
-
-> 这个 ID 只写在本地 `.env`（已被 `.gitignore` 忽略，不提交仓库），你只需填这一回，之后更新代码都不再碰它。**网页上的资源/绑定/密钥全部是下拉/点选，已经无需你手抄 ID。**
-
-**访问**：管理后台 `https://cloud-r2pan.<你的账号>.workers.dev/admin`（用 `admin` 密钥登录）。
-
-***
-
-### 方式 B：命令行部署
-
-需要先在本地准备好两个环境变量（**都在本地文件里，不进仓库**）。
-
-**1. 登录与安装**
-
-```bash
-npm install
-npx wrangler login
-```
-
-**2. 创建并记录资源**
-
-```bash
-npx wrangler r2 bucket create cloud-r2pan
-npx wrangler d1 create cloud-r2pan       # 输出里记下 database_id
-```
-
-**3. 把 ID 存到本地** **`.env`（一次性）**
-
-在项目根目录新建 `.env`（已被 `.gitignore` 忽略，不会提交）：
-
-```env
-D1_DATABASE_ID="你的真实database_id"
-```
-
-> 配置 [wrangler.jsonc](wrangler.jsonc) 里的 `database_id` 引用的是环境变量 `${D1_DATABASE_ID}`，这里填一次即可，之后部署都能读到。
-
-**4. 设置管理密钥**
-
-```bash
-npx wrangler secret put admin       # 交互输入，不会回显
-```
-
-**5. 部署**
-
-```bash
-npm run deploy      # 等价于 npx wrangler deploy
-```
-
-`npm run dev` 本地预览用 `.dev.vars` 的占位 ID，不需要真实值。
+- 分享页：`https://cloud-r2pan.<你的账号>.workers.dev/s/<token>`
 
 ***
 
@@ -121,23 +60,27 @@ npm run deploy      # 等价于 npx wrangler deploy
 
 ```bash
 npm install
-npm run dev          # 默认 http://localhost:8787，自动跳到 /admin
+npm run dev      # 默认 http://localhost:8787，自动跳到 /admin
 ```
 
-数据库建表（`files` / `shares` / `download_logs` / `banned_ips` / `settings` / `traffic_stats`）会在首次请求时由 `ensureSchema` 自动创建，无需手动导 SQL。
+> 当前 `wrangler.jsonc` 未声明 R2/D1 绑定，本地 `npm run dev` 没有数据库/存储模拟，主要用来调页面与联调、主流程请以线上为准。
+> 若确需本地模拟：临时在 `wrangler.jsonc` 加回 `d1_databases`/`r2_buckets` 段（用占位 id），部署前再删掉。
+
+数据库表（`files` / `shares` / `download_logs` / `banned_ips` / `settings` / `traffic_stats`）会在首次请求时由 `ensureSchema` 自动创建，无需手动导 SQL。
 
 ***
 
 ## 四、常见问题
 
-| 问题             | 处理                                                         |
-| -------------- | ---------------------------------------------------------- |
-| 网页绑定了资源，代码还没生效 | 控制台只负责 R2/D1/绑定/密钥，代码还需本地一次部署（见方式 A 第 6 步）                 |
-| 想部署到其它名称       | 改 `wrangler.jsonc` 的 `name`，并同步改资源名/绑定                     |
-| 首页 500 / D1 报错 | 确认 `.env` 的 `D1_DATABASE_ID` 是你的真实 ID（方式 B）                |
-| 登录一直失败         | 确认已执行 `npx wrangler secret put admin`，且与控制台一致              |
-| 单文件上传大小限制      | Worker 请求体上限 100 MB，超过会被前端拦截提示                             |
-| 自定义域名（可选）      | Worker → Settings → Domains & Routes 添加，需 DNS 在 Cloudflare |
+| 问题                  | 处理                                                                        |
+| ------------------- | ------------------------------------------------------------------------- |
+| 之前报 `10021`         | 那是旧配置把绑定写进 `wrangler.jsonc` 导致。现在绑定走网页，`npm run deploy` 不再需要 database\_id |
+| 首页/D1 500           | 确认 Worker 的 `db`（D1）绑定已添加且选的库是 `cloud-r2pan`                              |
+| 登录一直失败              | 确认设置了 `admin` Secret，并和管理后台输入一致                                           |
+| 上传对象在 R2 找不到        | 确认 Worker 的 `r2` 绑定已添加且桶名是 `cloud-r2pan`                                  |
+| 本地 dev 报 no binding | 见「本地开发」说明：本地默认无模拟，需要时临时加回绑定段                                              |
+| 单文件上传大小             | Worker 请求体上限 100 MB，超过会被前端拦截提示                                            |
+| 自定义域名（可选）           | Worker → Settings → Domains & Routes 添加（域名需在 Cloudflare）                  |
 
-> 日常用网页端：**Workers → cloud-r2pan → Console / Logs / Metrics** 查看日志与监控。
+> 日常用网页端：**Workers → cloud-r2pan → Console / Logs / Metrics** 看日志与监控。
 
