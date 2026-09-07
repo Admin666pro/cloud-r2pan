@@ -7,8 +7,9 @@
   "r2_buckets": [
     { "binding": "r2", "bucket_name": "cloud-r2pan" }
   ],
+  // database_id 通过环境变量 D1_DATABASE_ID 注入，仓库不落真实 ID，避免泄露
   "d1_databases": [
-    { "binding": "db", "database_name": "cloud-r2pan", "database_id": "LOCAL_PLACEHOLDER" }
+    { "binding": "db", "database_name": "cloud-r2pan", "database_id": "${D1_DATABASE_ID}" }
   ],
 
   // 将 public/*.html 作为文本模块导入
