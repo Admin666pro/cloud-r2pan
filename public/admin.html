@@ -1345,8 +1345,8 @@ async function loadSecurity(){
   $('#sec-result').onchange = e => { secResult = e.target.value; secPage = 1; loadSecurity(); };
   let secTimer;
   $('#sec-q').oninput = e => { clearTimeout(secTimer); secTimer = setTimeout(() => { secQuery = e.target.value.trim(); secPage = 1; loadSecurity(); }, 350); };
-  $('#sec-pg-prev').onclick = () => { secPage--; loadSecurity(); };
-  $('#sec-pg-next').onclick = () => { secPage++; loadSecurity(); };
+  $('#sec-pg-prev')?.addEventListener('click', () => { secPage--; loadSecurity(); });
+  $('#sec-pg-next')?.addEventListener('click', () => { secPage++; loadSecurity(); });
   $('#sec-clear-30').onclick = async () => {
     if(!(await confirmDialog(t('secConfirmClear30T'), t('secConfirmClear30D'), false))) return;
     const r = await api('/api/admin/login-logs?mode=older&days=30', { method:'DELETE' });
@@ -1506,14 +1506,14 @@ async function loadSettings(){
   };
 
   // Turnstile 重置访问计数
-  $('#ts-reset').onclick = async () => {
+  $('#ts-reset')?.addEventListener('click', async () => {
     if(!(await confirmDialog(t('tsResetVisits'), t('tsResetVisitsD'), false))) return;
     await api('/api/admin/turnstile/visits', { method:'DELETE' });
     toast(t('tsVisitsReset'));
-  };
+  });
 
   // 2FA Setup
-  $('#twofa-setup').onclick = async () => {
+  $('#twofa-setup')?.addEventListener('click', async () => {
     const adminKey = await promptAdminKey();
     if(!adminKey) return;
     try{
@@ -1549,10 +1549,10 @@ async function loadSettings(){
         }catch(err){ toast(err.message, 'err'); }
       };
     }catch(err){ toast(err.message, 'err'); }
-  };
+  });
 
   // ── 2FA Disable ──
-  $('#twofa-disable').onclick = async () => {
+  $('#twofa-disable')?.addEventListener('click', async () => {
     if(!(await confirmDialog(t('twofaDisableT'), t('twofaDisableD'), true))) return;
     const adminKey = await promptAdminKey();
     if(!adminKey) return;
@@ -1561,10 +1561,10 @@ async function loadSettings(){
       toast(t('twofaSetupT').includes('开启') ? '2FA 已关闭' : '2FA disabled');
       loadSettings();
     }catch(err){ toast(err.message, 'err'); }
-  };
+  });
 
   // ── 2FA Regen Recovery ──
-  $('#twofa-regen').onclick = async () => {
+  $('#twofa-regen')?.addEventListener('click', async () => {
     if(!(await confirmDialog(t('twofaRegenT'), t('twofaRegenD'), false))) return;
     const adminKey = await promptAdminKey();
     if(!adminKey) return;
@@ -1572,7 +1572,7 @@ async function loadSettings(){
       const r = await api('/api/admin/2fa/regen-recovery', { method:'POST', body: JSON.stringify({ admin_key: adminKey }) });
       showRecoveryCodes(r.recovery_codes);
     }catch(err){ toast(err.message, 'err'); }
-  };
+  });
 }
 
 function promptAdminKey(){
