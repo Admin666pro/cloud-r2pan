@@ -705,6 +705,7 @@ export async function handleAdminApi(
       turnstile_sitekey_override: s.turnstileSitekeyOverride,
       cloudflare_turnstile_sitekey: !!env.turnstile_sitekey,
       cloudflare_turnstile_secret: !!env.turnstile_secret,
+      turnstile_secret_configured: !!s.turnstileSecretCipher,
       // OAuth2 总开关 + providers 概要
       oauth_enabled: s.oauthEnabled,
       oauth_providers: providers.results.map((p) => ({
@@ -748,6 +749,17 @@ export async function handleAdminApi(
     if (typeof body.turnstile_sitekey_override === "string") {
       // 允许清空
       patch.turnstile_sitekey_override = body.turnstile_sitekey_override.trim();
+    }
+    // Turnstile Secret —— 如果 Modal 里传了新密码则加密存；空字符串则清掉；__keep__ 表示保留
+    if (typeof body.turnstile_secret === "string") {
+      const raw = body.turnstile_secret.trim();
+      if (raw === "") {
+        patch.turnstile_secret_cipher = "";
+      } else if (raw !== "__keep__") {
+        const cipher = await encryptSecret(raw, env.admin);
+        if (cipher) patch.turnstile_secret_cipher = cipher;
+      }
+      // raw === "__keep__" 或不传 → 保留原值不动
     }
     // OAuth2 总开关（具体 provider 配置由 /api/admin/oauth/providers CRUD 管理）
     if (typeof body.oauth_enabled === "boolean") patch.oauth_enabled = body.oauth_enabled ? "1" : "0";

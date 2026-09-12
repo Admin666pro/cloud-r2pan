@@ -457,7 +457,15 @@ const I18N = {
     tsThresholdHelp: '0 = 每次都弹；N = 该 IP 当天访问分享页超过 N 次后开始弹',
     tsSitekeyOverride: 'SiteKey 覆盖（可选）',
     tsSitekeyOverrideHelp: '如果你没在 Cloudflare Secret 里配 turnstile_sitekey，可在此填入',
-    tsSecretHint: 'Secret 必须在 Cloudflare Secret 里配置 turnstile_secret 才能生效',
+    tsSecretOverride: 'Turnstile Secret',
+    tsSecretPlaceholder: '填入你的 Secret Key（SK 开头）',
+    tsSecretKeep: '留空不改动',
+    tsSecretInCloudflare: '已在 Cloudflare Secret 中（优先使用）',
+    tsSecretInDatabase: '已在数据库中加密存储',
+    tsInCloudflare: '已在 Cloudflare Secret 中',
+    tsInDatabase: '已在数据库中配置',
+    tsMissingBoth: 'Cloudflare Secret 和数据库都未配置，需要填写',
+    tsSecretHint: '可以填在这里（加密存入数据库），也可以在 Cloudflare Secret 里配 turnstile_secret（优先）',
     tsSecretOk: '已配置 ✅',
     tsSecretMissing: '未配置 ❌',
     tsSitekeyCloudflareOk: 'SiteKey 已在 Cloudflare Secret 配置 ✅',
@@ -646,7 +654,15 @@ const I18N = {
     tsThresholdHelp: '0 = always show; N = show after this IP visits N times today',
     tsSitekeyOverride: 'SiteKey override (optional)',
     tsSitekeyOverrideHelp: 'Only needed if you did NOT set turnstile_sitekey as a Cloudflare Secret',
-    tsSecretHint: 'Turnstile requires turnstile_secret to be set as a Cloudflare Secret',
+    tsSecretOverride: 'Turnstile Secret',
+    tsSecretPlaceholder: 'Enter your Secret Key (starts with SK)',
+    tsSecretKeep: 'Leave blank to keep unchanged',
+    tsSecretInCloudflare: 'Set in Cloudflare Secret (takes priority)',
+    tsSecretInDatabase: 'Stored encrypted in the database',
+    tsInCloudflare: 'set in Cloudflare Secret',
+    tsInDatabase: 'set in database',
+    tsMissingBoth: 'Missing in both Cloudflare Secret and database — please enter below',
+    tsSecretHint: 'Can be entered here (encrypted) or set as Cloudflare Secret turnstile_secret (takes priority)',
     tsSecretOk: 'Configured ✅',
     tsSecretMissing: 'Not configured ❌',
     tsSitekeyCloudflareOk: 'SiteKey set in Cloudflare Secret ✅',
@@ -1634,9 +1650,21 @@ async function loadSettings(){
       <div class="field">
         <label>${esc(t('tsSitekeyOverride'))}</label>
         <input type="text" id="ts-sko" value="${esc(s.turnstile_sitekey_override ?? '')}" placeholder="0xAAAA..." style="width:100%;padding:10px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
+      </div>
+      <div class="field">
+        <label>${esc(t('tsSecretOverride'))}</label>
+        <input type="password" id="ts-secret" value="" placeholder="${s.cloudflare_turnstile_secret || s.turnstile_secret_configured ? esc(t('tsSecretKeep')) : esc(t('tsSecretPlaceholder'))}" style="width:100%;padding:10px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
         <div class="tip" style="line-height:1.6">
-          ${s.cloudflare_turnstile_secret ? `<span style="color:#6ee7b7">✓ ${esc(t('tsSecretOk'))}</span>` : `<span style="color:#fda293">⚠ ${esc(t('tsSecretMissing'))} — ${esc(t('tsSecretHint'))}</span>`}<br>
-          ${s.cloudflare_turnstile_sitekey ? `<span style="color:#6ee7b7">✓ Sitekey 在 Cloudflare Secret 中</span>` : `<span style="color:#fde68a">⚠ Sitekey 未在 Cloudflare Secret 中，需要在上方 Override 里填写</span>`}
+          ${s.cloudflare_turnstile_secret
+            ? `<span style="color:#6ee7b7">✓ ${esc(t('tsSecretOk'))} — ${esc(t('tsSecretInCloudflare'))}</span>`
+            : s.turnstile_secret_configured
+              ? `<span style="color:#a5d8ff">✓ ${esc(t('tsSecretOk'))} — ${esc(t('tsSecretInDatabase'))}</span>`
+              : `<span style="color:#fda293">⚠ ${esc(t('tsSecretMissing'))} — ${esc(t('tsSecretHint'))}</span>`}<br>
+          ${s.cloudflare_turnstile_sitekey
+            ? `<span style="color:#6ee7b7">✓ Sitekey ${esc(t('tsInCloudflare'))}</span>`
+            : s.turnstile_sitekey_override
+              ? `<span style="color:#a5d8ff">✓ Sitekey ${esc(t('tsInDatabase'))}</span>`
+              : `<span style="color:#fde68a">⚠ Sitekey ${esc(t('tsMissingBoth'))}</span>`}
         </div>
       </div>
       <div class="actions" style="margin-top:18px">
@@ -1646,10 +1674,21 @@ async function loadSettings(){
     `);
     $('[data-x]')?.addEventListener('click', closeModal);
     $('#ts-save')?.addEventListener('click', async () => {
+      const secretVal = $('#ts-secret').value.trim();
+      // 处理 Secret 三种状态：空 = 保留原值；非空(非 __keep__) = 更新；用户显式点"清除"走其他路径
+      let secretPayload = '__keep__';
+      if (secretVal === '') {
+        secretPayload = '__keep__'; // 空表示不改
+      } else if (secretVal === '__clear__') {
+        secretPayload = ''; // 显式清除（目前不用这个，占位）
+      } else {
+        secretPayload = secretVal;
+      }
       const body = {
         turnstile_mode: $('#ts-m').value,
         turnstile_threshold: Number($('#ts-th').value) || 0,
         turnstile_sitekey_override: $('#ts-sko').value.trim(),
+        turnstile_secret: secretPayload,
       };
       await api('/api/admin/settings', { method:'PUT', body: JSON.stringify(body) });
       closeModal();

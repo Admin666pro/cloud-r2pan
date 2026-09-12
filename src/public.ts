@@ -3,7 +3,7 @@ import { getSettings, addTraffic } from "./settings";
 import { parseUA } from "./ua";
 import { clientIp } from "./auth";
 import { errorPage } from "./pages";
-import { hmacHex, sha256Hex, randomHex, safeEqual } from "./crypto";
+import { hmacHex, sha256Hex, randomHex, safeEqual, decryptSecret } from "./crypto";
 import { verifyOAuthSession } from "./oauth";
 
 const TOKEN_TTL_MS = 24 * 3600_000; // 授权令牌有效期 24h
@@ -29,9 +29,20 @@ async function trackAndGetVisits(env: Env, ip: string): Promise<number> {
   return row?.count ?? 1;
 }
 
-/** 判断当前 Turnstile 是否可用（secret 必须在 env 里配） */
-function isTurnstileEnabled(env: Env, settings: { turnstileMode: string; turnstileThreshold: number }): boolean {
-  if (!env.turnstile_secret) return false;
+/** 从 env 或 settings.cipher 拿到最终的 Turnstile Secret（优先 env） */
+async function getTurnstileSecret(env: Env, settings: { turnstileSecretCipher: string | null }): Promise<string | null> {
+  if (env.turnstile_secret) return env.turnstile_secret;
+  if (settings.turnstileSecretCipher) return await decryptSecret(settings.turnstileSecretCipher, env.admin);
+  return null;
+}
+
+/** 判断当前 Turnstile 是否可用（secret 必须在 env 或 settings 里配） */
+export async function isTurnstileEnabled(
+  env: Env,
+  settings: { turnstileMode: string; turnstileThreshold: number; turnstileSecretCipher: string | null }
+): Promise<boolean> {
+  const secret = await getTurnstileSecret(env, settings);
+  if (!secret) return false;
   if (settings.turnstileMode === "off") return false;
   return true;
 }
@@ -52,11 +63,17 @@ export function getTurnstileInfo(
  * 验证 Turnstile token —— 向 Cloudflare siteverify 发 POST。
  * 官方要求 POST application/x-www-form-urlencoded: secret + token
  */
-export async function verifyTurnstileToken(env: Env, token: string, remoteip: string): Promise<boolean> {
-  if (!env.turnstile_secret || !token) return false;
+export async function verifyTurnstileToken(
+  env: Env,
+  settings: { turnstileSecretCipher: string | null },
+  token: string,
+  remoteip: string
+): Promise<boolean> {
+  const secret = await getTurnstileSecret(env, settings);
+  if (!secret || !token) return false;
   try {
     const form = new URLSearchParams({
-      secret: env.turnstile_secret,
+      secret,
       response: token,
       remoteip,
     });
@@ -143,7 +160,7 @@ export async function handleShareInfo(req: Request, env: Env, token: string): Pr
 
   // Turnstile：在 share 页面加载时统计一次访问，判断是否需要弹
   const ip = clientIp(req);
-  const enabled = isTurnstileEnabled(env, settings);
+  const enabled = await isTurnstileEnabled(env, settings);
   let needsTurnstile = false;
   let visitCount = 0;
   let sitekey: string | null = null;
@@ -217,11 +234,11 @@ export async function handleVerify(req: Request, env: Env, token: string): Promi
 
   const settings = await getSettings(env);
   const ip = clientIp(req);
-  const turnstileOn = isTurnstileEnabled(env, settings) && (settings.turnstileMode === "both");
+  const turnstileOn = await isTurnstileEnabled(env, settings) && (settings.turnstileMode === "both");
 
   // Turnstile 校验（both 模式下必须有有效 token）
   if (turnstileOn) {
-    const pass = await verifyTurnstileToken(env, String(body.turnstile ?? ""), ip);
+    const pass = await verifyTurnstileToken(env, settings, String(body.turnstile ?? ""), ip);
     if (!pass) {
       return Response.json({ error: "turnstile_failed" }, { status: 403 });
     }
@@ -371,7 +388,7 @@ export async function handleDownload(
   }
 
   // 2.7 Turnstile 下载验证码（on_download / both 模式）
-  if (isTurnstileEnabled(env, settings)) {
+  if (await isTurnstileEnabled(env, settings)) {
     const url = new URL(req.url);
     const mode = settings.turnstileMode;
     const downloadGate = mode === "on_download" || mode === "both";
@@ -391,7 +408,7 @@ export async function handleDownload(
           { siteTitle: settings.siteTitle }
         );
       }
-      const pass = await verifyTurnstileToken(env, turnstileToken, ip);
+      const pass = await verifyTurnstileToken(env, settings, turnstileToken, ip);
       if (!pass) {
         return errorPage(
           req,
