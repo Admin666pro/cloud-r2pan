@@ -5,6 +5,8 @@ import { clientIp } from "./auth";
 import { errorPage } from "./pages";
 import { hmacHex, sha256Hex, randomHex, safeEqual } from "./crypto";
 
+const TOKEN_TTL_MS = 24 * 3600_000; // 授权令牌有效期 24h
+
 /** 解析 Range 头 → {offset, length}，无效返回 null */
 function parseRange(header: string | null, size: number): { offset: number; length: number } | null {
   if (!header) return null;
@@ -60,8 +62,6 @@ async function verifyShareToken(env: Env, token: string, query: string): Promise
   const want = await hmacHex(env.admin, `${token}:${exp}`);
   return safeEqual(t.slice(i + 1), want);
 }
-
-const TOKEN_TTL_MS = 24 * 3600_000; // 授权令牌有效期 24h
 
 /** GET /s/:token —— 分享页元信息（供前端渲染） */
 export async function handleShareInfo(req: Request, env: Env, token: string): Promise<Response> {
@@ -183,6 +183,37 @@ export async function handleDownload(
       }
     );
 
+  // 🔴 Bug A 修复：主流程原子扣减下载次数 —— 超卖拦截
+  //
+  // 原实现在 L175 用 row.download_count（旧值）拦截，计数更新在 waitUntil 里，
+  // 响应发出后才 +1 → 并发 20 个请求全过，max=3 形同虚设。
+  //
+  // 修复：把 UPDATE 挪到主流程、R2 读取之前，用 SQL 条件原子完成：
+  //   UPDATE shares SET download_count = download_count + 1
+  //   WHERE id = ? AND (max_downloads IS NULL OR download_count < max_downloads)
+  // changes = 0  → 已达上限，拦截
+  // changes = 1  → 原子成功，继续读取 R2
+  if (row.max_downloads) {
+    const r = await env.db
+      .prepare(
+        `UPDATE shares SET download_count = download_count + 1
+         WHERE id = ?1 AND download_count < ?2`
+      )
+      .bind(token, row.max_downloads)
+      .run();
+    if ((r.meta.changes ?? 0) === 0) {
+      return errorPage(
+        req,
+        410,
+        { zh: "下载次数已达上限", en: "Download Limit Reached" },
+        {
+          zh: `该资源允许下载 ${row.max_downloads} 次，名额已用完。`,
+          en: `This resource allows ${row.max_downloads} downloads and the quota is used up.`,
+        }
+      );
+    }
+  }
+
   // 2.5 密码校验：需先解锁（POST /s/:token/verify 获取授权令牌）
   if (row.password_hash && !(await verifyShareToken(env, token, new URL(req.url).search))) {
     return errorPage(
@@ -289,18 +320,17 @@ export async function handleDownload(
     headers.set("content-range", `bytes ${range.offset}-${range.offset + servedLen - 1}/${row.size}`);
   }
 
-  // 6. 后台记录：下载日志 + 计数 + 流量（不阻塞响应）
+  // 6. 后台记录：下载日志 + 流量（计数已在主流程原子扣减完成）
   const bytes = servedLen;
   ctx.waitUntil(
     (async () => {
       const { browser, os } = parseUA(ua);
-      await env.db.batch([
-        env.db.prepare(
-          `INSERT INTO download_logs(share_id, file_id, file_name, ip, ua, browser, os, country, bytes, created_at)
-           VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
-        ).bind(token, row.file_id, row.name, ip, ua.slice(0, 500), browser, os, country, bytes, Date.now()),
-        env.db.prepare("UPDATE shares SET download_count = download_count + 1 WHERE id = ?1").bind(token),
-      ]);
+      await env.db.prepare(
+        `INSERT INTO download_logs(share_id, file_id, file_name, ip, ua, browser, os, country, bytes, created_at)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
+      )
+        .bind(token, row.file_id, row.name, ip, ua.slice(0, 500), browser, os, country, bytes, Date.now())
+        .run();
       await addTraffic(env, bytes);
     })()
   );
