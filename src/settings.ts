@@ -23,6 +23,18 @@ export interface Settings {
   totpSecretCipher: string | null;
   /** 恢复码列表（D1 中存的是 hash 后的值，用逗号分隔） */
   totpRecoveryHash: string | null;
+  /**
+   * Turnstile 模式：
+   *   "off"        = 关闭
+   *   "on_share"   = 打开分享链接时触发
+   *   "on_download"= 点击下载时触发
+   *   "both"       = 分享链接打开和下载都可以触发（按阈值）
+   */
+  turnstileMode: "off" | "on_share" | "on_download" | "both";
+  /** 每天每个 IP 触发 Turnstile 的访问次数阈值。0 = 每次都弹。 */
+  turnstileThreshold: number;
+  /** Turnstile sitekey 覆盖（如果没在 Cloudflare Secret 里配，可在这里写） */
+  turnstileSitekeyOverride: string | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -37,6 +49,9 @@ export const DEFAULT_SETTINGS: Settings = {
   totpEnabled: false,
   totpSecretCipher: null,
   totpRecoveryHash: null,
+  turnstileMode: "off",
+  turnstileThreshold: 5,
+  turnstileSitekeyOverride: null,
 };
 
 function toInt(v: unknown, fallback: number): number {
@@ -76,6 +91,9 @@ export async function getSettings(env: Env): Promise<Settings> {
     totpEnabled: map.get("totp_enabled") === "1",
     totpSecretCipher: map.get("totp_secret_cipher") ?? null,
     totpRecoveryHash: map.get("totp_recovery_hash") ?? null,
+    turnstileMode: (map.get("turnstile_mode") ?? DEFAULT_SETTINGS.turnstileMode) as Settings["turnstileMode"],
+    turnstileThreshold: toInt(map.get("turnstile_threshold"), DEFAULT_SETTINGS.turnstileThreshold),
+    turnstileSitekeyOverride: map.get("turnstile_sitekey_override") ?? null,
   };
 }
 

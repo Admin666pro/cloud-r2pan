@@ -686,6 +686,12 @@ export async function handleAdminApi(
       auto_ban: s.autoBan,
       ban_hours: s.banHours,
       traffic_used_bytes: s.trafficUsedBytes,
+      // Turnstile
+      turnstile_mode: s.turnstileMode,
+      turnstile_threshold: s.turnstileThreshold,
+      turnstile_sitekey_override: s.turnstileSitekeyOverride,
+      cloudflare_turnstile_sitekey: !!env.turnstile_sitekey,
+      cloudflare_turnstile_secret: !!env.turnstile_secret,
     });
   }
 
@@ -705,8 +711,31 @@ export async function handleAdminApi(
     const banHours = num(body.ban_hours);
     if (banHours !== null) patch.ban_hours = String(Math.floor(banHours));
     if (typeof body.auto_ban === "boolean") patch.auto_ban = body.auto_ban ? "1" : "0";
+    // Turnstile
+    if (typeof body.turnstile_mode === "string") {
+      const m = body.turnstile_mode as string;
+      if (["off", "on_share", "on_download", "both"].includes(m)) {
+        patch.turnstile_mode = m;
+      }
+    }
+    const th = num(body.turnstile_threshold);
+    if (th !== null) patch.turnstile_threshold = String(Math.floor(th));
+    if (typeof body.turnstile_sitekey_override === "string") {
+      // 允许清空
+      patch.turnstile_sitekey_override = body.turnstile_sitekey_override.trim();
+    }
     await updateSettings(env, patch);
     return json({ ok: true });
+  }
+
+  // ── 清空 Turnstile 访问计数 ────────────────────────
+  if (path === "/api/admin/turnstile/visits" && method === "DELETE") {
+    const days = Number(new URL(req.url).searchParams.get("days"));
+    const before = days > 0 ? new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10) : null;
+    const r = before
+      ? await env.db.prepare("DELETE FROM turnstile_visits WHERE day < ?1").bind(before).run()
+      : await env.db.prepare("DELETE FROM turnstile_visits").run();
+    return json({ ok: true, deleted: r.meta.changes ?? 0 });
   }
 
   // ── 重置本月流量 ──────────────────────────────────

@@ -445,6 +445,26 @@ const I18N = {
     twofaRecoveryRemaining: '剩余恢复码 {n} 个',
     twofaStatusOn: '已开启',
     twofaStatusOff: '未开启',
+    // Turnstile
+    tsGroupTitle: '🛡️ Cloudflare Turnstile 人机验证',
+    tsGroupD: '防止机器人爬虫滥用分享链接。可按触发时机选择开启，并按每日访问阈值决定对某 IP 是否弹出。',
+    tsMode: '触发时机',
+    tsModeOff: '关闭',
+    tsModeShare: '打开分享链接时',
+    tsModeDownload: '点击下载时',
+    tsModeBoth: '两者都可以（双重保险）',
+    tsThreshold: '每 IP 每日触发阈值（次）',
+    tsThresholdHelp: '0 = 每次都弹；N = 该 IP 当天访问分享页超过 N 次后开始弹',
+    tsSitekeyOverride: 'SiteKey 覆盖（可选）',
+    tsSitekeyOverrideHelp: '如果你没在 Cloudflare Secret 里配 turnstile_sitekey，可在此填入',
+    tsSecretHint: 'Secret 必须在 Cloudflare Secret 里配置 turnstile_secret 才能生效',
+    tsSecretOk: '已配置 ✅',
+    tsSecretMissing: '未配置 ❌',
+    tsSitekeyCloudflareOk: 'SiteKey 已在 Cloudflare Secret 配置 ✅',
+    tsSitekeyCloudflareMissing: '未在 Cloudflare Secret 配置 turnstile_sitekey',
+    tsResetVisits: '重置今日访问计数',
+    tsResetVisitsD: '清空所有 IP 今日访问计数，让它们重新从头开始计数。',
+    tsVisitsReset: '访问计数已重置',
   },
   en: {
     docTitle: '{site} · Admin Console',
@@ -574,6 +594,26 @@ const I18N = {
     twofaRecoveryRemaining: '{n} recovery codes remaining',
     twofaStatusOn: 'Enabled',
     twofaStatusOff: 'Disabled',
+    // Turnstile
+    tsGroupTitle: '🛡️ Cloudflare Turnstile',
+    tsGroupD: 'Block bots from abusing your share links. Choose when to trigger and set a daily per-IP threshold to decide who gets challenged.',
+    tsMode: 'Trigger',
+    tsModeOff: 'Off',
+    tsModeShare: 'On share page load',
+    tsModeDownload: 'On download click',
+    tsModeBoth: 'Both (double guard)',
+    tsThreshold: 'Daily per-IP threshold',
+    tsThresholdHelp: '0 = always show; N = show after this IP visits N times today',
+    tsSitekeyOverride: 'SiteKey override (optional)',
+    tsSitekeyOverrideHelp: 'Only needed if you did NOT set turnstile_sitekey as a Cloudflare Secret',
+    tsSecretHint: 'Turnstile requires turnstile_secret to be set as a Cloudflare Secret',
+    tsSecretOk: 'Configured ✅',
+    tsSecretMissing: 'Not configured ❌',
+    tsSitekeyCloudflareOk: 'SiteKey set in Cloudflare Secret ✅',
+    tsSitekeyCloudflareMissing: 'turnstile_sitekey not set in Cloudflare Secret',
+    tsResetVisits: 'Reset visit counters',
+    tsResetVisitsD: 'Clear today\'s per-IP visit counts so everyone starts fresh.',
+    tsVisitsReset: 'Visit counters cleared',
   }
 };
 
@@ -1395,6 +1435,40 @@ async function loadSettings(){
         }
       </div>
     </div>
+    <!-- Turnstile 组 -->
+    <div class="glass group">
+      <div class="row">
+        <div class="info"><div class="t">${esc(t('tsGroupTitle'))}</div>
+        <div class="d">${esc(t('tsGroupD'))}</div></div>
+      </div>
+      <div class="row">
+        <label>${esc(t('tsMode'))}</label>
+        <select id="ts-mode" style="padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
+          <option value="off" ${s.turnstile_mode==='off'?'selected':''} style="color:#111">${esc(t('tsModeOff'))}</option>
+          <option value="on_share" ${s.turnstile_mode==='on_share'?'selected':''} style="color:#111">${esc(t('tsModeShare'))}</option>
+          <option value="on_download" ${s.turnstile_mode==='on_download'?'selected':''} style="color:#111">${esc(t('tsModeDownload'))}</option>
+          <option value="both" ${s.turnstile_mode==='both'?'selected':''} style="color:#111">${esc(t('tsModeBoth'))}</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>${esc(t('tsThreshold'))}</label>
+        <input type="number" id="ts-threshold" min="0" max="10000" value="${s.turnstile_threshold ?? 5}" style="width:120px;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;text-align:center">
+      </div>
+      <div class="row" style="flex-direction:column;align-items:flex-start">
+        <div style="font-size:12px;color:var(--text-3);line-height:1.6">
+          ${esc(t('tsThresholdHelp'))}<br>
+          ${s.cloudflare_turnstile_secret ? `<span style="color:#6ee7b7">${esc(t('tsSecretOk'))}</span>` : `<span style="color:#fda293">${esc(t('tsSecretMissing'))} — ${esc(t('tsSecretHint'))}</span>`}<br>
+          ${s.cloudflare_turnstile_sitekey ? `<span style="color:#6ee7b7">${esc(t('tsSitekeyCloudflareOk'))}</span>` : `<span style="color:#fde68a">${esc(t('tsSitekeyCloudflareMissing'))}</span>`}
+        </div>
+      </div>
+      <div class="row">
+        <label>${esc(t('tsSitekeyOverride'))}</label>
+        <input type="text" id="ts-sitekey" value="${esc(s.turnstile_sitekey_override ?? '')}" placeholder="0xAAAA..." style="flex:1;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
+      </div>
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn sm" id="ts-reset">${esc(t('tsResetVisits'))}</button>
+      </div>
+    </div>
     <button class="btn primary" id="st-save" style="padding:14px 28px;font-size:15px;border-radius:18px">${esc(t('save'))}</button>`;
 
   $('#st-reset-traffic').onclick = async () => {
@@ -1421,19 +1495,29 @@ async function loadSettings(){
       count_window_hours: Number($('#st-window').value) || 0,
       auto_ban: $('#st-autoban').checked,
       ban_hours: Number($('#st-banhours').value) || 0,
+      // Turnstile
+      turnstile_mode: $('#ts-mode').value,
+      turnstile_threshold: Number($('#ts-threshold').value) || 0,
+      turnstile_sitekey_override: $('#ts-sitekey').value.trim(),
     };
     await api('/api/admin/settings', { method:'PUT', body: JSON.stringify(body) });
     toast(t('saved'));
     loadSettings();
   };
 
-  // ── 2FA Setup ──
+  // Turnstile 重置访问计数
+  $('#ts-reset')?.onclick = async () => {
+    if(!(await confirmDialog(t('tsResetVisits'), t('tsResetVisitsD'), false))) return;
+    await api('/api/admin/turnstile/visits', { method:'DELETE' });
+    toast(t('tsVisitsReset'));
+  };
+
+  // 2FA Setup
   $('#twofa-setup')?.onclick = async () => {
     const adminKey = await promptAdminKey();
     if(!adminKey) return;
     try{
       const r = await api('/api/admin/2fa/setup', { method:'POST', body: JSON.stringify({ admin_key: adminKey }) });
-      // 用 QR Code 渲染 uri（用免费 API 或 SVG）
       const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(r.uri)}`;
       openModal(`
         <h3>${esc(t('twofaSetupT'))}</h3>

@@ -4,6 +4,10 @@ export interface Env {
   admin: string;
   /** 可选：2FA 恢复密钥（Cloudflare 后台配置）。优先级高于 D1 里的恢复码。 */
   totp_recovery?: string;
+  /** 可选：Turnstile sitekey（前端渲染 widget 用）。优先级高于 settings 里的 sitekey_override。 */
+  turnstile_sitekey?: string;
+  /** 可选：Turnstile secret（后端验证 token 用）。没配则 Turnstile 整体禁用。 */
+  turnstile_secret?: string;
 }
 
 export interface ShareRow {
