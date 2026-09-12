@@ -64,16 +64,57 @@ const SCHEMA_STATEMENTS: string[] = [
 
 let schemaReady = false;
 
+/**
+ * 确保数据库表结构存在 —— 首次请求时自动建表，无需手动迁移。
+ *
+ * ── Bug #5 修复：并发 DDL 风险 ──────────────────────────────────
+ * 原实现每个 Isolate 都有独立的 schemaReady 布尔，冷启动时多 Isolate 会并发跑 DDL batch，
+ * 虽然 CREATE TABLE IF NOT EXISTS 本身幂等，但每次都跑完整 DDL 很重。
+ *
+ * 新实现分层短路：
+ *   1. schemaReady（内存）—— 本 Isolate 内的快速短路，零成本
+ *   2. 轻量 SELECT settings —— 跨 Isolate 安全检测，schema 已就绪时极快（D1 命中索引）
+ *   3. 只有表真的不存在时才执行 DDL batch —— 且用 try/catch 兜底竞态
+ *
+ * 绝大多数请求命中 ① 或 ②，不会触发 DDL。
+ */
 export async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  // 逐条执行 DDL（D1 exec 对多行多语句解析不稳定，batch 更可靠）
-  await env.db.batch(SCHEMA_STATEMENTS.map((sql) => env.db.prepare(sql)));
-  // 迁移：旧库补 password_hash 列（若已存在则静默跳过）
+
+  // ② 跨 Isolate 安全检测：settings 表是 schema 中最后创建的一张，
+  // 它存在意味着整个 schema 已就绪
   try {
-    await env.db.prepare("ALTER TABLE shares ADD COLUMN password_hash TEXT").run();
+    const row = await env.db.prepare("SELECT 1 FROM settings LIMIT 1").first();
+    if (row) {
+      schemaReady = true;
+      return;
+    }
   } catch {
-    /* 列已存在或重复添加，忽略 */
+    // 表不存在或查询失败，继续走 DDL 路径
   }
+
+  // ③ 真正的建表路径（首次部署 / 库被清空时触发）
+  // 用 try/catch 处理极端竞态：另一个 Isolate 刚好也在执行 DDL
+  try {
+    await env.db.batch(SCHEMA_STATEMENTS.map((sql) => env.db.prepare(sql)));
+    // 迁移：旧库补 password_hash 列（若已存在则静默跳过）
+    try {
+      await env.db.prepare("ALTER TABLE shares ADD COLUMN password_hash TEXT").run();
+    } catch {
+      /* 列已存在或重复添加，忽略 */
+    }
+  } catch {
+    // 竞态兜底：可能另一个 Isolate 刚建完表。
+    // 再检测一次，确认表存在就算成功
+    try {
+      const row = await env.db.prepare("SELECT 1 FROM settings LIMIT 1").first();
+      if (!row) throw new Error("schema still missing after DDL attempt");
+    } catch (e) {
+      // 表确实没建起来，重新抛出让上层决定
+      throw e;
+    }
+  }
+
   schemaReady = true;
 }
 
