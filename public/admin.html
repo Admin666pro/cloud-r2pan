@@ -1621,7 +1621,9 @@ function showRecoveryCodes(codes){
     siteTitle = s.site_title || siteTitle;
     showApp();
   }catch{
-    showLogin();
+    // api() 内部已对 401 调用 showLogin() 并 throw，这里静默兜底即可
+    // 若 api() 因其他错误 throw，也不渲染空页面
+    if (!document.querySelector('#login-view')) showLogin();
   }
 })();
 </script>

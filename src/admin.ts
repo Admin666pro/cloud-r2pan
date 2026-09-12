@@ -108,20 +108,55 @@ export async function handleAdminApi(
 
       if (totpOk) {
         ctx.waitUntil(writeLoginLog(env, req, "login", "success", "2fa_totp"));
-      } else {
-        // 尝试恢复码（两种来源：Cloudflare Secret 优先 → D1 恢复码）
-        const normalized = body.code.replace(/\s+/g, "").toUpperCase();
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json;charset=utf-8",
+            "set-cookie": await createSession(env, url.protocol === "https:"),
+            "cache-control": "no-store",
+          },
+        });
+      }
 
-        // 1) Cloudflare Secret 恢复码（超级恢复，用一次不消耗）
-        const cloudflareRecovery = env.totp_recovery?.trim();
-        if (cloudflareRecovery && safeEqual(normalized, cloudflareRecovery.replace(/\s+/g, "").toUpperCase())) {
-          // 用了云变量恢复码 —— 自动重置 2FA（因为 secret 可能丢了）
+      // TOTP 失败 → 尝试恢复码（两种来源：Cloudflare Secret 优先 → D1 恢复码）
+      const normalized = body.code.replace(/\s+/g, "").toUpperCase();
+
+      // 1) Cloudflare Secret 恢复码（超级恢复，用一次不消耗）
+      const cloudflareRecovery = env.totp_recovery?.trim();
+      if (cloudflareRecovery && safeEqual(normalized, cloudflareRecovery.replace(/\s+/g, "").toUpperCase())) {
+        // 用了云变量恢复码 —— 自动重置 2FA（因为 secret 可能丢了）
+        await updateSettings(env, {
+          totp_enabled: "0",
+          totp_secret_cipher: "",
+          totp_recovery_hash: "",
+        });
+        ctx.waitUntil(writeLoginLog(env, req, "login", "success", "recovery_cloudflare"));
+        return new Response(JSON.stringify({ ok: true, recovery_used: true, totp_reset: true }), {
+          headers: {
+            "content-type": "application/json;charset=utf-8",
+            "set-cookie": await createSession(env, url.protocol === "https:"),
+            "cache-control": "no-store",
+          },
+        });
+      }
+
+      // 2) D1 存储的恢复码列表（消耗型，用一次删一次）
+      if (s.totpRecoveryHash) {
+        const hashes = s.totpRecoveryHash.split(",").filter(Boolean);
+        const inputHash = await sha256Hex(normalized);
+        let matched = -1;
+        for (let i = 0; i < hashes.length; i++) {
+          if (safeEqual(inputHash, hashes[i])) { matched = i; break; }
+        }
+        if (matched >= 0) {
+          // 从列表中移除已使用的恢复码
+          hashes.splice(matched, 1);
+          await updateSettings(env, { totp_recovery_hash: hashes.join(",") });
+          // 恢复码通过 → 自动重置 2FA
           await updateSettings(env, {
             totp_enabled: "0",
             totp_secret_cipher: "",
-            totp_recovery_hash: "",
           });
-          ctx.waitUntil(writeLoginLog(env, req, "login", "success", "recovery_cloudflare"));
+          ctx.waitUntil(writeLoginLog(env, req, "login", "success", "recovery_code"));
           return new Response(JSON.stringify({ ok: true, recovery_used: true, totp_reset: true }), {
             headers: {
               "content-type": "application/json;charset=utf-8",
@@ -130,42 +165,15 @@ export async function handleAdminApi(
             },
           });
         }
-
-        // 2) D1 存储的恢复码列表（消耗型，用一次删一次）
-        if (s.totpRecoveryHash) {
-          const hashes = s.totpRecoveryHash.split(",").filter(Boolean);
-          const inputHash = await sha256Hex(normalized);
-          let matched = -1;
-          for (let i = 0; i < hashes.length; i++) {
-            if (safeEqual(inputHash, hashes[i])) { matched = i; break; }
-          }
-          if (matched >= 0) {
-            // 从列表中移除已使用的恢复码
-            hashes.splice(matched, 1);
-            await updateSettings(env, { totp_recovery_hash: hashes.join(",") });
-            // 恢复码通过 → 自动重置 2FA
-            await updateSettings(env, {
-              totp_enabled: "0",
-              totp_secret_cipher: "",
-            });
-            ctx.waitUntil(writeLoginLog(env, req, "login", "success", "recovery_code"));
-            return new Response(JSON.stringify({ ok: true, recovery_used: true, totp_reset: true }), {
-              headers: {
-                "content-type": "application/json;charset=utf-8",
-                "set-cookie": await createSession(env, url.protocol === "https:"),
-                "cache-control": "no-store",
-              },
-            });
-          }
-        }
-
-        // 都不对
-        ctx.waitUntil(writeLoginLog(env, req, "login", "fail", "invalid_2fa"));
-        return json({ error: msg(req, "2FA 验证失败", "Invalid 2FA code") }, 401);
       }
+
+      // 都不对
+      ctx.waitUntil(writeLoginLog(env, req, "login", "fail", "invalid_2fa"));
+      return json({ error: msg(req, "2FA 验证失败", "Invalid 2FA code") }, 401);
     }
 
-    ctx.waitUntil(writeLoginLog(env, req, "login", "success", needsTotp ? "2fa" : null));
+    // 无需 2FA → 直接登录成功
+    ctx.waitUntil(writeLoginLog(env, req, "login", "success"));
     return new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json;charset=utf-8",
