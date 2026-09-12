@@ -5,6 +5,8 @@ import { clientIp } from "./auth";
 import { errorPage } from "./pages";
 import { hmacHex, sha256Hex, randomHex, safeEqual } from "./crypto";
 
+const TOKEN_TTL_MS = 24 * 3600_000; // 授权令牌有效期 24h
+
 /** 解析 Range 头 → {offset, length}，无效返回 null */
 function parseRange(header: string | null, size: number): { offset: number; length: number } | null {
   if (!header) return null;
@@ -60,8 +62,6 @@ async function verifyShareToken(env: Env, token: string, query: string): Promise
   const want = await hmacHex(env.admin, `${token}:${exp}`);
   return safeEqual(t.slice(i + 1), want);
 }
-
-const TOKEN_TTL_MS = 24 * 3600_000; // 授权令牌有效期 24h
 
 /** GET /s/:token —— 分享页元信息（供前端渲染） */
 export async function handleShareInfo(req: Request, env: Env, token: string): Promise<Response> {

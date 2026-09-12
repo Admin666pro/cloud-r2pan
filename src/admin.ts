@@ -59,7 +59,7 @@ export async function handleAdminApi(
     if (!env.admin)
       return json({ error: msg(req, "未设置 admin 密钥，请先执行 npx wrangler secret put admin", "admin is not set. Run: npx wrangler secret put admin") }, 500);
     const body = await readJson<{ key: string }>(req);
-    if (!body.key || !(await checkAdminKey(env, body.key))) {
+    if (!body.key || !checkAdminKey(env, body.key)) {
       return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
     }
     return new Response(JSON.stringify({ ok: true }), {
@@ -257,15 +257,56 @@ export async function handleAdminApi(
     return json({ shares });
   }
 
-  // ── 清理失效分享（过期 / 已撤销 / 达上限） ────────
+  // ── 清理失效分享（过期 / 已撤销 / 达上限） + 孤儿 files + 孤儿 R2 对象 ──
   if (path === "/api/admin/shares/cleanup" && method === "POST") {
     const now = Date.now();
-    const r = await env.db.prepare(
+    // 1. 删除失效 shares
+    const deleted = await env.db.prepare(
       "DELETE FROM shares WHERE revoked = 1 OR (expires_at IS NOT NULL AND expires_at < ?1) OR (max_downloads IS NOT NULL AND download_count >= max_downloads)"
     )
       .bind(now)
       .run();
-    return json({ ok: true, deleted: r.meta.changes ?? 0 });
+
+    // 2. 查出孤儿 files：没有任何 share 引用的文件（LEFT JOIN 反查）
+    const orphans = await env.db.prepare(
+      `SELECT f.id, f.key FROM files f
+       LEFT JOIN shares s ON s.file_id = f.id
+       WHERE s.id IS NULL`
+    ).all<{ id: string; key: string }>();
+
+    const orphanIds = (orphans.results ?? []).map((o) => o.id);
+    const orphanKeys = (orphans.results ?? []).map((o) => o.key);
+
+    // 3. 删除孤儿 files 的 DB 记录 + 关联 download_logs
+    if (orphanIds.length > 0) {
+      // D1 支持 IN (...) 参数绑定
+      const placeholders = orphanIds.map((_, i) => `?${i + 1}`).join(", ");
+      await env.db.batch([
+        env.db.prepare(`DELETE FROM download_logs WHERE file_id IN (${placeholders})`).bind(...orphanIds),
+        env.db.prepare(`DELETE FROM files WHERE id IN (${placeholders})`).bind(...orphanIds),
+      ]);
+    }
+
+    // 4. 异步清理孤儿 R2 对象（不阻塞响应，R2 批量删除可能慢）
+    if (orphanKeys.length > 0) {
+      ctx.waitUntil(
+        (async () => {
+          for (const key of orphanKeys) {
+            try {
+              await env.r2.delete(key);
+            } catch {
+              // R2 delete 失败不影响 DB 清理结果，静默跳过
+            }
+          }
+        })()
+      );
+    }
+
+    return json({
+      ok: true,
+      deleted_shares: deleted.meta.changes ?? 0,
+      deleted_orphan_files: orphanIds.length,
+    });
   }
 
   // ── 撤销/删除分享 ─────────────────────────────────

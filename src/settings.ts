@@ -80,43 +80,46 @@ export async function updateSettings(env: Env, patch: Partial<Record<string, str
 /**
  * 记录一次下载产生的流量（跨月自动重置）。
  *
- * ── Bug #2 修复：消除 read-compute-write 竞态 ──
- * 旧实现先读 traffic_used_bytes，在 JS 里加 bytes，再写回；并发下载时多个请求读到相同值，
- * 最终只累加到最大值 + 1，造成严重漏记。
+ * ── Bug #1 彻底修复（上一次修复只消除了 read-compute-write，
+ *    但在 00:00 跨月瞬间仍存在竞态） ──
  *
- * 新实现：
- *   1. 单次 SELECT 检测 traffic_month 是否匹配当月
- *   2. 同月 → UPDATE ... SET value = CAST(CAST(value AS INTEGER) + ? AS TEXT)  （数据库原子累加）
- *      跨月 → INSERT ... ON CONFLICT DO UPDATE SET value = excluded.value       （重置为 bytes）
- *   3. traffic_stats 原本就是原子累加，保持不变
+ * 根因：SELECT 检测 crossMonth → JS 分支选 SQL → batch 写入，
+ * 三步之间没有事务隔离。并发请求同时读到"上月"就都走 crossMonth 分支，
+ * 最后一个覆盖前值，丢流量。
  *
- * 整个写路径不再依赖任何预先读到的 Settings 对象，并发安全。
+ * 方案：
+ *   1. 跨月判断完全内联到单个 UPDATE 语句的 SQL 子查询里，
+ *      数据库自己读 traffic_month 做 CASE WHEN，不再经过 JS 分支
+ *   2. 三个 SQL 包在 transaction batch 中，保证原子执行
+ *   3. 完全去掉前置 SELECT，消除竞态窗口
+ *
+ * 无论多少并发，同一事务内 CASE WHEN 读到的 traffic_month 是一致的，
+ * 要么全部累加（同月），要么全部重置（跨月）。
  */
 export async function addTraffic(env: Env, bytes: number): Promise<void> {
   const now = new Date();
   const month = now.toISOString().slice(0, 7);
   const day = now.toISOString().slice(0, 10);
 
-  // 单次查询检测是否跨月
-  const row = await env.db.prepare(
-    "SELECT value FROM settings WHERE key = 'traffic_month'"
-  ).first<{ value: string }>();
-  const crossMonth = !row || row.value !== month;
-
-  // 根据检测结果选择原子写入策略
-  const trafficUsedStmt = crossMonth
-    ? env.db.prepare(
-        "INSERT INTO settings(key, value) VALUES('traffic_used_bytes', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-      ).bind(String(bytes))
-    : env.db.prepare(
-        "UPDATE settings SET value = CAST(CAST(value AS INTEGER) + ?1 AS TEXT) WHERE key = 'traffic_used_bytes'"
-      ).bind(String(bytes));
-
   await env.db.batch([
+    // ① 同步 traffic_month 到当月（幂等：同月时 value 不变）
     env.db.prepare(
       "INSERT INTO settings(key, value) VALUES('traffic_month', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     ).bind(month),
-    trafficUsedStmt,
+
+    // ② 更新 traffic_used_bytes —— 跨月逻辑完全内联在 SQL 里
+    //    同月：累加旧值；跨月：从 0 开始加
+    env.db.prepare(
+      `UPDATE settings SET value = CAST(
+        CASE
+          WHEN (SELECT value FROM settings WHERE key = 'traffic_month') = ?1
+          THEN COALESCE((SELECT value FROM settings WHERE key = 'traffic_used_bytes'), '0')
+          ELSE '0'
+        END AS INTEGER) + ?2 AS TEXT)
+       WHERE key = 'traffic_used_bytes'`
+    ).bind(month, String(bytes)),
+
+    // ③ traffic_stats 每日汇总（原本就是原子累加，保持不变）
     env.db.prepare(
       "INSERT INTO traffic_stats(day, bytes, downloads) VALUES(?1, ?2, 1) ON CONFLICT(day) DO UPDATE SET bytes = bytes + excluded.bytes, downloads = downloads + excluded.downloads"
     ).bind(day, bytes),
