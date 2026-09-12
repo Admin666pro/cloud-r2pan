@@ -92,14 +92,8 @@ export async function handleAdminApi(
 
   // ── 概览统计 ──────────────────────────────────────
   if (path === "/api/admin/stats" && method === "GET") {
+    // getSettings 内部已做跨月自动兜底，无需此处重复检查和 DB 写入
     const s = await getSettings(env);
-    const month = new Date().toISOString().slice(0, 7);
-    if (s.trafficMonth !== month && s.trafficUsedBytes > 0) {
-      // 跨月自动归零（首次请求时兜底）
-      await updateSettings(env, { traffic_used_bytes: "0", traffic_month: month });
-      s.trafficUsedBytes = 0;
-      s.trafficMonth = month;
-    }
     const [files, shares, activeShares, totalDownloads, todayStat, chartRows, recent, banned] =
       await Promise.all([
         env.db.prepare("SELECT COUNT(*) AS c FROM files").first<{ c: number }>(),

@@ -325,7 +325,7 @@ export async function handleDownload(
         ).bind(token, row.file_id, row.name, ip, ua.slice(0, 500), browser, os, country, bytes, Date.now()),
         env.db.prepare("UPDATE shares SET download_count = download_count + 1 WHERE id = ?1").bind(token),
       ]);
-      await addTraffic(env, settings, bytes);
+      await addTraffic(env, bytes);
     })()
   );
 

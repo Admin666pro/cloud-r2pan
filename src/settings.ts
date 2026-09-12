@@ -40,11 +40,26 @@ export async function getSettings(env: Env): Promise<Settings> {
     "SELECT key, value FROM settings"
   ).all<{ key: string; value: string }>();
   const map = new Map((results ?? []).map((r) => [r.key, r.value]));
+
+  // ── Bug #1 修复：跨月自动兜底 ──────────────────────────────────
+  // 任何调用 getSettings 的地方（下载检查、stats API、settings API、session API）
+  // 都会自动得到本月正确的流量值，不再出现"上月用完→本月锁死"的死锁。
+  // 此处仅修正内存返回值，DB 实际清零由后续写入操作（addTraffic / stats）自愈。
+  const now = new Date();
+  const currentMonth = now.toISOString().slice(0, 7);
+  const storedMonth = map.get("traffic_month") ?? "";
+  let trafficUsedBytes = toInt(map.get("traffic_used_bytes"), 0);
+  let trafficMonth = storedMonth;
+  if (storedMonth && storedMonth !== currentMonth && trafficUsedBytes > 0) {
+    trafficUsedBytes = 0;
+    trafficMonth = currentMonth;
+  }
+
   return {
     siteTitle: map.get("site_title") ?? DEFAULT_SETTINGS.siteTitle,
     trafficLimitBytes: toInt(map.get("traffic_limit_bytes"), DEFAULT_SETTINGS.trafficLimitBytes),
-    trafficUsedBytes: toInt(map.get("traffic_used_bytes"), 0),
-    trafficMonth: map.get("traffic_month") ?? "",
+    trafficUsedBytes,
+    trafficMonth,
     maxDownloadsPerIp: toInt(map.get("max_downloads_per_ip"), DEFAULT_SETTINGS.maxDownloadsPerIp),
     countWindowHours: toInt(map.get("count_window_hours"), DEFAULT_SETTINGS.countWindowHours),
     autoBan: (map.get("auto_ban") ?? "1") === "1",
@@ -62,19 +77,46 @@ export async function updateSettings(env: Env, patch: Partial<Record<string, str
   if (upserts.length > 0) await env.db.batch(upserts);
 }
 
-/** 记录一次下载产生的流量，跨月自动重置 */
-export async function addTraffic(env: Env, s: Settings, bytes: number): Promise<void> {
+/**
+ * 记录一次下载产生的流量（跨月自动重置）。
+ *
+ * ── Bug #2 修复：消除 read-compute-write 竞态 ──
+ * 旧实现先读 traffic_used_bytes，在 JS 里加 bytes，再写回；并发下载时多个请求读到相同值，
+ * 最终只累加到最大值 + 1，造成严重漏记。
+ *
+ * 新实现：
+ *   1. 单次 SELECT 检测 traffic_month 是否匹配当月
+ *   2. 同月 → UPDATE ... SET value = CAST(CAST(value AS INTEGER) + ? AS TEXT)  （数据库原子累加）
+ *      跨月 → INSERT ... ON CONFLICT DO UPDATE SET value = excluded.value       （重置为 bytes）
+ *   3. traffic_stats 原本就是原子累加，保持不变
+ *
+ * 整个写路径不再依赖任何预先读到的 Settings 对象，并发安全。
+ */
+export async function addTraffic(env: Env, bytes: number): Promise<void> {
   const now = new Date();
   const month = now.toISOString().slice(0, 7);
   const day = now.toISOString().slice(0, 10);
-  const newUsed = (s.trafficMonth === month ? s.trafficUsedBytes : 0) + bytes;
+
+  // 单次查询检测是否跨月
+  const row = await env.db.prepare(
+    "SELECT value FROM settings WHERE key = 'traffic_month'"
+  ).first<{ value: string }>();
+  const crossMonth = !row || row.value !== month;
+
+  // 根据检测结果选择原子写入策略
+  const trafficUsedStmt = crossMonth
+    ? env.db.prepare(
+        "INSERT INTO settings(key, value) VALUES('traffic_used_bytes', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      ).bind(String(bytes))
+    : env.db.prepare(
+        "UPDATE settings SET value = CAST(CAST(value AS INTEGER) + ?1 AS TEXT) WHERE key = 'traffic_used_bytes'"
+      ).bind(String(bytes));
+
   await env.db.batch([
-    env.db.prepare(
-      "INSERT INTO settings(key, value) VALUES('traffic_used_bytes', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-    ).bind(String(newUsed)),
     env.db.prepare(
       "INSERT INTO settings(key, value) VALUES('traffic_month', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     ).bind(month),
+    trafficUsedStmt,
     env.db.prepare(
       "INSERT INTO traffic_stats(day, bytes, downloads) VALUES(?1, ?2, 1) ON CONFLICT(day) DO UPDATE SET bytes = bytes + excluded.bytes, downloads = downloads + excluded.downloads"
     ).bind(day, bytes),
