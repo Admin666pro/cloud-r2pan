@@ -6,6 +6,7 @@ import type { Env } from "./types";
  *   files          上传到 R2 的文件元数据
  *   shares         分享链接 (token 即主键)
  *   download_logs  下载记录 (IP / 浏览器 / 系统 / 流量)
+ *   login_logs     管理员登录记录 (成功/失败/登出, 防盗号审计)
  *   banned_ips     封禁名单 (支持到期自动解封)
  *   settings       可调参数 + 流量用量统计
  *   traffic_stats  每日流量/下载汇总 (用于图表)
@@ -27,7 +28,8 @@ const SCHEMA_STATEMENTS: string[] = [
     max_downloads INTEGER,
     download_count INTEGER NOT NULL DEFAULT 0,
     revoked INTEGER NOT NULL DEFAULT 0,
-    password_hash TEXT
+    password_hash TEXT,
+    password_cipher TEXT
   )`,
   `CREATE INDEX IF NOT EXISTS idx_shares_file ON shares(file_id)`,
   `CREATE TABLE IF NOT EXISTS download_logs (
@@ -45,6 +47,20 @@ const SCHEMA_STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_logs_share_ip ON download_logs(share_id, ip, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_logs_created ON download_logs(created_at)`,
+  `CREATE TABLE IF NOT EXISTS login_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT NOT NULL,
+    ip TEXT NOT NULL,
+    ua TEXT,
+    browser TEXT,
+    os TEXT,
+    country TEXT,
+    result TEXT NOT NULL,
+    reason TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_login_logs_created ON login_logs(created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_login_logs_ip ON login_logs(ip)`,
   `CREATE TABLE IF NOT EXISTS banned_ips (
     ip TEXT PRIMARY KEY,
     reason TEXT,
@@ -101,7 +117,13 @@ export async function ensureSchema(env: Env): Promise<void> {
     try {
       await env.db.prepare("ALTER TABLE shares ADD COLUMN password_hash TEXT").run();
     } catch {
-      /* 列已存在或重复添加，忽略 */
+      /* 列已存在，忽略 */
+    }
+    // 迁移：旧库补 password_cipher 列（加密后的密码明文）
+    try {
+      await env.db.prepare("ALTER TABLE shares ADD COLUMN password_cipher TEXT").run();
+    } catch {
+      /* 列已存在，忽略 */
     }
   } catch {
     // 竞态兜底：可能另一个 Isolate 刚建完表。
