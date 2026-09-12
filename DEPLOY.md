@@ -26,6 +26,8 @@ Worker → Settings → Bindings → Add binding：
 | `r2` | R2 Bucket | cloud-r2pan |
 | `db` | D1 Database | cloud-r2pan |
 
+admin 是 Secret，不在 Bindings 面板。Worker → Settings → Variables and Secrets → Add → **Secret**，Variable name 填 `admin`，值填你自己设定的管理密码。也可以直接走下面的命令行。
+
 ## 4. 设置 Secret
 
 ```bash
