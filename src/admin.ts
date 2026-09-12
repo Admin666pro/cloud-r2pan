@@ -4,6 +4,8 @@ import { getSettings, updateSettings } from "./settings";
 import { checkAdminKey, createSession, verifySession, clientIp, rateLimitLogin } from "./auth";
 import { pickLang } from "./i18n";
 import { hashPassword } from "./public";
+import { parseUA } from "./ua";
+import { encryptSecret, decryptSecret } from "./crypto";
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -41,6 +43,30 @@ async function requireAuth(req: Request, env: Env): Promise<Response | null> {
   return null;
 }
 
+/** 写入登录安全日志 —— 登录/登出/失败/限流 全部走这里 */
+async function writeLoginLog(
+  env: Env,
+  req: Request,
+  action: string,
+  result: string,
+  reason: string | null = null
+): Promise<void> {
+  try {
+    const ua = req.headers.get("user-agent") ?? "";
+    const { browser, os } = parseUA(ua);
+    // Cloudflare 下 country 由 CF-IPCountry 头提供
+    const country = req.headers.get("cf-ipcountry") ?? null;
+    await env.db
+      .prepare(
+        "INSERT INTO login_logs(action, ip, ua, browser, os, country, result, reason, created_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+      )
+      .bind(action, clientIp(req), ua || null, browser, os, country, result, reason, Date.now())
+      .run();
+  } catch {
+    // 日志写入失败不影响主流程
+  }
+}
+
 export async function handleAdminApi(
   req: Request,
   env: Env,
@@ -54,14 +80,19 @@ export async function handleAdminApi(
   // ── 登录（无需会话） ──────────────────────────────
   if (path === "/api/admin/login" && method === "POST") {
     const ip = clientIp(req);
-    if (!rateLimitLogin(ip))
+    if (!rateLimitLogin(ip)) {
+      // 限流也记一笔
+      ctx.waitUntil(writeLoginLog(env, req, "login", "fail", "rate_limited"));
       return json({ error: msg(req, "尝试过于频繁，请稍后再试", "Too many attempts. Please try again later.") }, 429);
+    }
     if (!env.admin)
       return json({ error: msg(req, "未设置 admin 密钥，请先执行 npx wrangler secret put admin", "admin is not set. Run: npx wrangler secret put admin") }, 500);
     const body = await readJson<{ key: string }>(req);
     if (!body.key || !checkAdminKey(env, body.key)) {
+      ctx.waitUntil(writeLoginLog(env, req, "login", "fail", "invalid_key"));
       return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
     }
+    ctx.waitUntil(writeLoginLog(env, req, "login", "success"));
     return new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json;charset=utf-8",
@@ -78,6 +109,7 @@ export async function handleAdminApi(
   // 登出
   if (path === "/api/admin/logout" && method === "POST") {
     const secure = url.protocol === "https:";
+    ctx.waitUntil(writeLoginLog(env, req, "logout", "success"));
     return new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json;charset=utf-8",
@@ -225,11 +257,13 @@ export async function handleAdminApi(
     const password =
       typeof body.password === "string" && body.password.trim() ? body.password.trim() : null;
     const passwordHash = password ? await hashPassword(password) : null;
+    // 可逆加密存储密码明文，管理员之后可查看
+    const passwordCipher = password ? await encryptSecret(password, env.admin) : null;
     const id = randomId(10);
     await env.db.prepare(
-      "INSERT INTO shares(id, file_id, created_at, expires_at, max_downloads, password_hash) VALUES(?1, ?2, ?3, ?4, ?5, ?6)"
+      "INSERT INTO shares(id, file_id, created_at, expires_at, max_downloads, password_hash, password_cipher) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)"
     )
-      .bind(id, body.file_id, Date.now(), expiresAt, maxDownloads, passwordHash)
+      .bind(id, body.file_id, Date.now(), expiresAt, maxDownloads, passwordHash, passwordCipher)
       .run();
     return json({ ok: true, id, url: `/s/${id}` }, 201);
   }
@@ -238,23 +272,29 @@ export async function handleAdminApi(
   if (path === "/api/admin/shares" && method === "GET") {
     const { results } = await env.db.prepare(
       `SELECT s.id, s.file_id, s.created_at, s.expires_at, s.max_downloads, s.download_count, s.revoked,
-              s.password_hash, f.name AS file_name, f.size AS file_size
+              s.password_hash, s.password_cipher, f.name AS file_name, f.size AS file_size
        FROM shares s JOIN files f ON f.id = s.file_id
        ORDER BY s.created_at DESC`
     ).all();
     const now = Date.now();
-    const shares = (results ?? []).map((s: any) => ({
-      ...s,
-      has_password: !!s.password_hash,
-      password_hash: undefined,
-      status: s.revoked
-        ? "revoked"
-        : s.expires_at && s.expires_at < now
-          ? "expired"
-          : s.max_downloads && s.download_count >= s.max_downloads
-            ? "maxed"
-            : "active",
-    }));
+    // 并行解密所有密码明文
+    const shares = await Promise.all(
+      (results ?? []).map(async (s: any) => ({
+        ...s,
+        has_password: !!s.password_hash,
+        // 解密密码明文（如果有 cipher 则尝试解密）
+        password_plain: s.password_cipher ? await decryptSecret(s.password_cipher, env.admin) : null,
+        password_hash: undefined,
+        password_cipher: undefined,
+        status: s.revoked
+          ? "revoked"
+          : s.expires_at && s.expires_at < now
+            ? "expired"
+            : s.max_downloads && s.download_count >= s.max_downloads
+              ? "maxed"
+              : "active",
+      }))
+    );
     return json({ shares });
   }
 
@@ -394,6 +434,75 @@ export async function handleAdminApi(
   if (banMatch && method === "DELETE") {
     await env.db.prepare("DELETE FROM banned_ips WHERE ip = ?1").bind(decodeURIComponent(banMatch[1])).run();
     return json({ ok: true });
+  }
+
+  // ── 登录安全日志（分页 + 筛选） ────────────────────────
+  if (path === "/api/admin/login-logs" && method === "GET") {
+    const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
+    const perPage = Math.min(100, Math.max(10, Number(url.searchParams.get("per_page")) || 20));
+    const q = url.searchParams.get("q")?.trim();
+    const action = url.searchParams.get("action")?.trim();
+    const result = url.searchParams.get("result")?.trim();
+    const where: string[] = [];
+    const binds: (string | number)[] = [];
+    let idx = 1;
+    if (q) {
+      where.push(`(ip LIKE ?${idx} OR browser LIKE ?${idx} OR os LIKE ?${idx})`);
+      binds.push(`%${q}%`);
+      idx++;
+    }
+    if (action) {
+      where.push(`action = ?${idx}`);
+      binds.push(action);
+      idx++;
+    }
+    if (result) {
+      where.push(`result = ?${idx}`);
+      binds.push(result);
+      idx++;
+    }
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const [total, rows] = await Promise.all([
+      env.db.prepare(`SELECT COUNT(*) AS c FROM login_logs ${whereSql}`).bind(...binds).first<{ c: number }>(),
+      env.db
+        .prepare(
+          `SELECT id, action, ip, browser, os, country, result, reason, created_at
+           FROM login_logs ${whereSql} ORDER BY id DESC LIMIT ?${idx} OFFSET ?${idx + 1}`
+        )
+        .bind(...binds, perPage, (page - 1) * perPage)
+        .all(),
+    ]);
+    // 统计：最近 24h 登录失败次数
+    const fail24h = await env.db
+      .prepare(
+        "SELECT COUNT(*) AS c FROM login_logs WHERE action = 'login' AND result = 'fail' AND created_at >= ?1"
+      )
+      .bind(Date.now() - 24 * 3600_000)
+      .first<{ c: number }>();
+    return json({
+      logs: rows.results ?? [],
+      total: total?.c ?? 0,
+      page,
+      per_page: perPage,
+      pages: Math.max(1, Math.ceil((total?.c ?? 0) / perPage)),
+      fail_last_24h: fail24h?.c ?? 0,
+    });
+  }
+
+  // ── 清除登录日志（全部 / N 天前） ──────────────────────
+  if (path === "/api/admin/login-logs" && method === "DELETE") {
+    const mode = url.searchParams.get("mode") ?? "all";
+    let sql: string;
+    const binds: number[] = [];
+    if (mode === "older") {
+      const days = Math.max(1, Number(url.searchParams.get("days")) || 30);
+      sql = "DELETE FROM login_logs WHERE created_at < ?1";
+      binds.push(Date.now() - days * 86400_000);
+    } else {
+      sql = "DELETE FROM login_logs";
+    }
+    const r = await env.db.prepare(sql).bind(...binds).run();
+    return json({ ok: true, deleted: r.meta.changes ?? 0 });
   }
 
   // ── 读取设置 ──────────────────────────────────────

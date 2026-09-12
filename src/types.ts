@@ -51,3 +51,18 @@ export interface LogRow {
   bytes: number;
   created_at: number;
 }
+
+export interface LoginLogRow {
+  id: number;
+  /** login | logout | verify_fail | rate_limited */
+  action: string;
+  ip: string;
+  ua: string | null;
+  browser: string;
+  os: string;
+  country: string | null;
+  /** success | fail */
+  result: string;
+  reason: string | null;
+  created_at: number;
+}

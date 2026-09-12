@@ -326,7 +326,7 @@ const I18N = {
     // 登录
     loginSubtitle: '管理后台 · 请输入管理密钥登录', keyPlaceholder: '管理密钥 (admin)',
     // 标签
-    tabOverview: '概览', tabFiles: '文件', tabShares: '分享', tabLogs: '记录', tabBans: '封禁', tabSettings: '设置',
+    tabOverview: '概览', tabFiles: '文件', tabShares: '分享', tabLogs: '记录', tabBans: '封禁', tabSecurity: '安全', tabSettings: '设置',
     // 概览
     statTraffic: '本月流量', usedPercent: '已用 {n}% · 跨月自动重置', noLimit: '未设置限额',
     statDownloads: '累计下载', todayN: '今日 {n} 次', statFiles: '文件总数', storedR2: '存储于 R2 对象存储',
@@ -392,6 +392,26 @@ const I18N = {
     deleteFileT: '删除文件', deleteFileD: '确定删除「{name}」？其所有分享链接和下载记录也会一并删除。',
     fileDeleted: '文件已删除',
     loadingErr: '加载失败',
+    // 分享密码显示
+    showPassword: '显示', hidePassword: '隐藏', copyPassword: '复制密码',
+    passwordCol: '密码', noPassword: '无',
+    // 登录安全
+    secTitle: '登录安全审计',
+    secSubtitle: '记录每次登录成功/失败/登出操作，防止盗号',
+    secBadgeFail24h: '最近 24h 失败 {n} 次',
+    secBadgeSafe: '🔒 登录状态良好',
+    actionLogin: '登录', actionLogout: '登出',
+    actionFail: '登录失败', actionRateLimited: '触发限流',
+    resultSuccess: '成功', resultFail: '失败',
+    colAction: '操作', colResult: '结果', colReason: '原因', colLoginTime: '时间',
+    secReasonInvalid: '密钥错误', secReasonRateLimited: '尝试过于频繁', secReasonSession: '会话失效',
+    secClear30: '清理 30 天前', secClearAll: '清空全部',
+    secConfirmClear30T: '清理登录日志', secConfirmClear30D: '删除 30 天前的所有登录日志。',
+    secConfirmClearAllT: '清空全部登录日志', secConfirmClearAllD: '将删除所有登录日志，此操作不可恢复。',
+    secClearedN: '已清理 {n} 条记录',
+    secNoLogs: '还没有登录记录', secSearchPh: '搜索 IP / 浏览器 / 系统…',
+    secFilterAll: '全部结果', secFilterSuccess: '仅成功', secFilterFail: '仅失败',
+    secActionAll: '全部操作',
   },
   en: {
     docTitle: '{site} · Admin Console',
@@ -402,7 +422,7 @@ const I18N = {
     // 登录
     loginSubtitle: 'Admin console · Enter your admin key to continue', keyPlaceholder: 'Admin key (admin)',
     // 标签
-    tabOverview: 'Overview', tabFiles: 'Files', tabShares: 'Shares', tabLogs: 'Logs', tabBans: 'Bans', tabSettings: 'Settings',
+    tabOverview: 'Overview', tabFiles: 'Files', tabShares: 'Shares', tabLogs: 'Logs', tabBans: 'Bans', tabSecurity: 'Security', tabSettings: 'Settings',
     // 概览
     statTraffic: 'Monthly Traffic', usedPercent: '{n}% used · resets monthly', noLimit: 'No limit set',
     statDownloads: 'Total Downloads', todayN: '{n} today', statFiles: 'Files', storedR2: 'Stored in R2 object storage',
@@ -468,6 +488,26 @@ const I18N = {
     deleteFileT: 'Delete file', deleteFileD: 'Delete "{name}"? All its share links and logs will also be deleted.',
     fileDeleted: 'File deleted',
     loadingErr: 'Failed to load',
+    // 分享密码显示
+    showPassword: 'Show', hidePassword: 'Hide', copyPassword: 'Copy password',
+    passwordCol: 'Password', noPassword: 'None',
+    // 登录安全
+    secTitle: 'Login Security',
+    secSubtitle: 'Every login/logout/failure is recorded here to detect unauthorized access',
+    secBadgeFail24h: '{n} failed in last 24h',
+    secBadgeSafe: '🔒 All clear',
+    actionLogin: 'Login', actionLogout: 'Logout',
+    actionFail: 'Login failed', actionRateLimited: 'Rate limited',
+    resultSuccess: 'Success', resultFail: 'Failed',
+    colAction: 'Action', colResult: 'Result', colReason: 'Reason', colLoginTime: 'Time',
+    secReasonInvalid: 'Wrong key', secReasonRateLimited: 'Too many attempts', secReasonSession: 'Session expired',
+    secClear30: 'Clear 30d+', secClearAll: 'Clear all',
+    secConfirmClear30T: 'Clear login logs', secConfirmClear30D: 'Delete login logs older than 30 days.',
+    secConfirmClearAllT: 'Clear all login logs', secConfirmClearAllD: 'All login logs will be deleted. This cannot be undone.',
+    secClearedN: 'Cleared {n} logs',
+    secNoLogs: 'No login logs yet', secSearchPh: 'Search IP / browser / OS…',
+    secFilterAll: 'All', secFilterSuccess: 'Success only', secFilterFail: 'Fail only',
+    secActionAll: 'All actions',
   }
 };
 
@@ -643,6 +683,7 @@ async function showApp(){
       <button data-tab="shares">${esc(t('tabShares'))}</button>
       <button data-tab="logs">${esc(t('tabLogs'))}</button>
       <button data-tab="bans">${esc(t('tabBans'))}</button>
+      <button data-tab="security">${esc(t('tabSecurity'))}</button>
       <button data-tab="settings">${esc(t('tabSettings'))}</button>
     </div>
     <div id="view"></div>
@@ -659,7 +700,7 @@ function switchTab(tab){
   $$('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   const v = $('#view');
   v.innerHTML = '<div class="spin"></div>';
-  ({ overview: loadOverview, files: loadFiles, shares: loadShares, logs: loadLogs, bans: loadBans, settings: loadSettings })[tab]().catch(e => {
+  ({ overview: loadOverview, files: loadFiles, shares: loadShares, logs: loadLogs, bans: loadBans, security: loadSecurity, settings: loadSettings })[tab]().catch(e => {
     v.innerHTML = `<div class="glass section"><div class="empty"><div class="icon">⚠️</div>${esc(e.message === 'unauthorized' ? t('loadingErr') : e.message)}</div></div>`;
   });
 }
@@ -881,17 +922,23 @@ async function loadShares(){
         <button class="btn sm" id="cleanup-shares">${esc(t('cleanup'))}</button></div>
       ${shares.length ? `
       <div style="overflow-x:auto"><table class="tbl">
-        <thead><tr><th>${esc(t('colFile'))}</th><th>${esc(t('colLink'))}</th><th>${esc(t('colDownloads'))} / ${esc(t('colExpires'))}</th><th>${esc(t('colCreated'))}</th><th>${esc(t('colExpires'))}</th><th>${esc(t('colStatus'))}</th><th style="width:80px">${esc(t('colActions'))}</th></tr></thead>
-        <tbody>${shares.map(s => `
+        <thead><tr><th>${esc(t('colFile'))}</th><th>${esc(t('colLink'))}</th><th>${esc(t('passwordCol'))}</th><th>${esc(t('colDownloads'))} / ${esc(t('colExpires'))}</th><th>${esc(t('colCreated'))}</th><th>${esc(t('colExpires'))}</th><th>${esc(t('colStatus'))}</th><th style="width:80px">${esc(t('colActions'))}</th></tr></thead>
+        <tbody>${shares.map(s => {
+          const pw = s.has_password ? (s.password_plain || '') : null;
+          return `
           <tr>
             <td class="name-cell">${ficon(s.file_name)} ${esc(s.file_name)}</td>
             <td class="mono">${s.has_password?'🔒 ':''}<a href="/s/${s.id}" target="_blank" style="color:#a5d8ff;text-decoration:none">/s/${s.id}</a></td>
+            <td class="mono">${pw ? `<span id="pw-${s.id}" style="font-family:ui-monospace,'SF Mono',monospace;color:#fde68a">••••••</span>
+              <button class="btn sm" data-pw="${s.id}" data-val="${esc(pw)}" style="padding:2px 8px;font-size:11px;margin-left:4px">👁</button>
+              <button class="btn sm" data-cpw="${esc(pw)}" style="padding:2px 8px;font-size:11px">📋</button>` : `<span style="color:var(--text-3)">—</span>`}</td>
             <td class="num">${s.download_count} / ${s.max_downloads ?? '∞'}</td>
             <td class="num">${fmtTime(s.created_at)}</td>
             <td class="num">${s.expires_at ? fmtTime(s.expires_at) : esc(t('forever'))}</td>
             <td><span class="tag ${s.status}"><i></i>${esc(t(STATUS_KEY[s.status]))}</span></td>
             <td><button class="btn sm danger" data-rv="${s.id}">${esc(t('revoke'))}</button></td>
-          </tr>`).join('')}
+          </tr>`;
+        }).join('')}
         </tbody>
       </table></div>` : `<div class="empty"><div class="icon">🔗</div>${esc(t('noShares'))}</div>`}
     </div>`;
@@ -906,6 +953,24 @@ async function loadShares(){
     await api(`/api/admin/shares/${b.dataset.rv}`, { method:'DELETE' });
     toast(t('shareRevoked'));
     loadShares();
+  });
+  // 密码显示/隐藏
+  $$('[data-pw]').forEach(b => {
+    b.onclick = () => {
+      const id = b.dataset.pw, val = b.dataset.val;
+      const el = $(`#pw-${id}`);
+      if(el.textContent === '••••••') {
+        el.textContent = val;
+        b.textContent = '🙈';
+      } else {
+        el.textContent = '••••••';
+        b.textContent = '👁';
+      }
+    };
+  });
+  // 复制密码
+  $$('[data-cpw]').forEach(b => {
+    b.onclick = () => copyText(b.dataset.cpw);
   });
 }
 
@@ -1003,6 +1068,94 @@ async function loadBans(){
     await api(`/api/admin/bans/${encodeURIComponent(b.dataset.unban)}`, { method:'DELETE' });
     toast(t('unbannedIp', {ip: b.dataset.unban})); loadBans();
   });
+}
+
+/* ═══════════ 登录安全审计 ═══════════ */
+let secPage = 1, secQuery = '', secAction = '', secResult = '';
+async function loadSecurity(){
+  const q = encodeURIComponent(secQuery);
+  const params = `page=${secPage}&per_page=20&q=${q}&action=${secAction}&result=${secResult}`;
+  const d = await api(`/api/admin/login-logs?${params}`);
+
+  const actionMap = { login: t('actionLogin'), logout: t('actionLogout'), verify_fail: t('actionFail'), rate_limited: t('actionRateLimited') };
+  const reasonMap = { invalid_key: t('secReasonInvalid'), rate_limited: t('secReasonRateLimited'), session_expired: t('secReasonSession') };
+
+  const badge24h = d.fail_last_24h;
+  $('#view').innerHTML = `
+    ${badge24h > 0 ? `
+    <div class="banner">
+      <div class="ic">⚠️</div>
+      <div><div class="t">${esc(t('secBadgeFail24h', {n: badge24h}))}</div>
+      <div class="d">${esc(t('secSubtitle'))}</div></div>
+    </div>` : ''}
+    <div class="glass section" style="margin-bottom:18px">
+      <div class="section-title"><h2>🛡️ ${esc(t('secTitle'))}</h2>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          ${badge24h === 0 ? `<span class="tag active"><i></i>${esc(t('secBadgeSafe'))}</span>` : `<span class="tag revoked"><i></i>${esc(t('secBadgeFail24h',{n:badge24h}))}</span>`}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select id="sec-action" style="padding:8px 12px;border-radius:12px;font-size:13px;font-family:inherit;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
+          <option value="" style="color:#111">${esc(t('secActionAll'))}</option>
+          <option value="login" style="color:#111">${esc(t('actionLogin'))}</option>
+          <option value="logout" style="color:#111">${esc(t('actionLogout'))}</option>
+        </select>
+        <select id="sec-result" style="padding:8px 12px;border-radius:12px;font-size:13px;font-family:inherit;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
+          <option value="" style="color:#111">${esc(t('secFilterAll'))}</option>
+          <option value="success" style="color:#111">${esc(t('secFilterSuccess'))}</option>
+          <option value="fail" style="color:#111">${esc(t('secFilterFail'))}</option>
+        </select>
+        <input id="sec-q" placeholder="${esc(t('secSearchPh'))}" value="${esc(secQuery)}"
+          style="padding:8px 14px;border-radius:12px;font-size:13px;font-family:inherit;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;flex:1;min-width:160px">
+        <button class="btn sm" id="sec-clear-30">${esc(t('secClear30'))}</button>
+        <button class="btn sm danger" id="sec-clear-all">${esc(t('secClearAll'))}</button>
+      </div>
+    </div>
+    <div class="glass section">
+      ${d.logs.length ? `
+      <div style="overflow-x:auto"><table class="tbl">
+        <thead><tr><th>${esc(t('colAction'))}</th><th>${esc(t('colIP'))}</th><th>${esc(t('colCountry'))}</th><th>${esc(t('colBrowser'))}</th><th>${esc(t('colOS'))}</th><th>${esc(t('colResult'))}</th><th>${esc(t('colReason'))}</th><th>${esc(t('colLoginTime'))}</th></tr></thead>
+        <tbody>${d.logs.map(l => {
+          const actText = actionMap[l.action] || l.action;
+          const reasonText = l.reason ? (reasonMap[l.reason] || l.reason) : '—';
+          return `<tr>
+            <td><span class="tag ${l.result === 'success' ? 'active' : 'revoked'}"><i></i>${esc(actText)}</span></td>
+            <td class="mono">${esc(l.ip)}</td>
+            <td>${esc(l.country || '—')}</td>
+            <td>${esc(l.browser)}</td>
+            <td>${esc(l.os)}</td>
+            <td>${l.result === 'success' ? '<span style="color:#6ee7b7">✓ ' + esc(t('resultSuccess')) + '</span>' : '<span style="color:#fda293">✗ ' + esc(t('resultFail')) + '</span>'}</td>
+            <td class="name-cell" title="${esc(reasonText)}">${esc(reasonText)}</td>
+            <td class="num">${fmtTime(l.created_at)}</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table></div>
+      <div class="pager">
+        <button class="btn sm" id="sec-pg-prev" ${d.page<=1?'disabled':''}>${esc(t('prev'))}</button>
+        <span class="info">${esc(t('pageOf',{a:d.page,b:d.pages}))} · ${esc(t('totalN',{n:d.total}))}</span>
+        <button class="btn sm" id="sec-pg-next" ${d.page>=d.pages?'disabled':''}>${esc(t('next'))}</button>
+      </div>` : `<div class="empty"><div class="icon">🛡️</div>${esc(t('secNoLogs'))}</div>`}
+    </div>`;
+
+  $('#sec-action').value = secAction;
+  $('#sec-result').value = secResult;
+  $('#sec-action').onchange = e => { secAction = e.target.value; secPage = 1; loadSecurity(); };
+  $('#sec-result').onchange = e => { secResult = e.target.value; secPage = 1; loadSecurity(); };
+  let secTimer;
+  $('#sec-q').oninput = e => { clearTimeout(secTimer); secTimer = setTimeout(() => { secQuery = e.target.value.trim(); secPage = 1; loadSecurity(); }, 350); };
+  $('#sec-pg-prev')?.onclick = () => { secPage--; loadSecurity(); };
+  $('#sec-pg-next')?.onclick = () => { secPage++; loadSecurity(); };
+  $('#sec-clear-30').onclick = async () => {
+    if(!(await confirmDialog(t('secConfirmClear30T'), t('secConfirmClear30D'), false))) return;
+    const r = await api('/api/admin/login-logs?mode=older&days=30', { method:'DELETE' });
+    toast(t('secClearedN', {n: r.deleted})); loadSecurity();
+  };
+  $('#sec-clear-all').onclick = async () => {
+    if(!(await confirmDialog(t('secConfirmClearAllT'), t('secConfirmClearAllD')))) return;
+    const r = await api('/api/admin/login-logs?mode=all', { method:'DELETE' });
+    toast(t('secClearedN', {n: r.deleted})); loadSecurity();
+  };
 }
 
 /* ═══════════ 设置 ═══════════ */
