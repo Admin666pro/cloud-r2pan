@@ -59,28 +59,31 @@ export function randomHex(n = 16): string {
  * 用 admin key 派生出 AES-GCM 密钥 —— 加密分享密码明文用。
  * 密钥派生: HKDF-SHA256(info = "share-password-v1")
  */
-let cachedAesKey: CryptoKey | null = null;
+let cachedAesKeyPromise: Promise<CryptoKey> | null = null;
 let cachedAesKeySecret = "";
 
 async function getAesKey(secret: string): Promise<CryptoKey> {
-  if (cachedAesKey && cachedAesKeySecret === secret) return cachedAesKey;
-  const baseKey = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HKDF" },
-    false,
-    ["deriveKey"]
-  );
-  const key = await crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(16), info: new TextEncoder().encode("share-password-v1") },
-    baseKey,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"]
-  );
-  cachedAesKey = key;
+  // 命中缓存：同一个 secret 的 in-flight Promise 或已完成的都直接复用
+  if (cachedAesKeyPromise && cachedAesKeySecret === secret) return cachedAesKeyPromise;
+  // 换了 secret 也要重新派生，覆盖旧缓存
   cachedAesKeySecret = secret;
-  return key;
+  cachedAesKeyPromise = (async () => {
+    const baseKey = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HKDF" },
+      false,
+      ["deriveKey"]
+    );
+    return await crypto.subtle.deriveKey(
+      { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(16), info: new TextEncoder().encode("share-password-v1") },
+      baseKey,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt", "decrypt"]
+    );
+  })();
+  return cachedAesKeyPromise;
 }
 
 /**
