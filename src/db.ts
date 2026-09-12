@@ -84,6 +84,13 @@ const SCHEMA_STATEMENTS: string[] = [
     bytes INTEGER NOT NULL DEFAULT 0,
     downloads INTEGER NOT NULL DEFAULT 0
   )`,
+  `CREATE TABLE IF NOT EXISTS oauth_states (
+    state TEXT PRIMARY KEY,
+    provider_id TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_oauth_states_expires ON oauth_states(expires_at)`,
 ];
 
 let schemaReady = false;

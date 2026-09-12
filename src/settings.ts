@@ -35,6 +35,26 @@ export interface Settings {
   turnstileThreshold: number;
   /** Turnstile sitekey 覆盖（如果没在 Cloudflare Secret 里配，可在这里写） */
   turnstileSitekeyOverride: string | null;
+
+  // ═══════ OAuth2 下载鉴权 ═══════
+  /** 是否启用 OAuth2 下载验证 */
+  oauthEnabled: boolean;
+  /** 使用哪个 Provider（github/google/microsoft/discord/custom） */
+  oauthProvider: string;
+  /** OAuth2 Client ID（明文存，可公开） */
+  oauthClientId: string;
+  /** OAuth2 Client Secret —— 用 admin AES-GCM 加密后存 */
+  oauthClientSecretCipher: string | null;
+  /** OAuth2 默认 scope */
+  oauthScope: string;
+  /** 自定义 Provider: authorize_url */
+  oauthCustomAuthorizeUrl: string;
+  /** 自定义 Provider: token_url */
+  oauthCustomTokenUrl: string;
+  /** 自定义 Provider: userinfo_url */
+  oauthCustomUserinfoUrl: string;
+  /** 自定义 Provider: token 返回字段名 */
+  oauthCustomTokenField: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -52,6 +72,16 @@ export const DEFAULT_SETTINGS: Settings = {
   turnstileMode: "off",
   turnstileThreshold: 5,
   turnstileSitekeyOverride: null,
+  // OAuth2
+  oauthEnabled: false,
+  oauthProvider: "github",
+  oauthClientId: "",
+  oauthClientSecretCipher: null,
+  oauthScope: "user:email",
+  oauthCustomAuthorizeUrl: "",
+  oauthCustomTokenUrl: "",
+  oauthCustomUserinfoUrl: "",
+  oauthCustomTokenField: "access_token",
 };
 
 function toInt(v: unknown, fallback: number): number {
@@ -94,6 +124,16 @@ export async function getSettings(env: Env): Promise<Settings> {
     turnstileMode: (map.get("turnstile_mode") ?? DEFAULT_SETTINGS.turnstileMode) as Settings["turnstileMode"],
     turnstileThreshold: toInt(map.get("turnstile_threshold"), DEFAULT_SETTINGS.turnstileThreshold),
     turnstileSitekeyOverride: map.get("turnstile_sitekey_override") ?? null,
+    // OAuth2
+    oauthEnabled: map.get("oauth_enabled") === "1",
+    oauthProvider: map.get("oauth_provider") ?? DEFAULT_SETTINGS.oauthProvider,
+    oauthClientId: map.get("oauth_client_id") ?? "",
+    oauthClientSecretCipher: map.get("oauth_client_secret_cipher") ?? null,
+    oauthScope: map.get("oauth_scope") ?? DEFAULT_SETTINGS.oauthScope,
+    oauthCustomAuthorizeUrl: map.get("oauth_custom_authorize_url") ?? "",
+    oauthCustomTokenUrl: map.get("oauth_custom_token_url") ?? "",
+    oauthCustomUserinfoUrl: map.get("oauth_custom_userinfo_url") ?? "",
+    oauthCustomTokenField: map.get("oauth_custom_token_field") ?? DEFAULT_SETTINGS.oauthCustomTokenField,
   };
 }
 

@@ -184,6 +184,16 @@ const I18N = {
     turnstileFail: '验证失败，请重试',
     turnstileContinue: '继续下载',
     turnstileDownloadNow: '立即下载',
+    // OAuth2
+    oauthLogin: '使用 {provider} 登录',
+    oauthLoggedInAs: '已登录 {provider}',
+    oauthLogout: '退出',
+    oauthContinueDownload: '继续下载',
+    oauthHint: '该资源需要通过第三方账号验证后才能下载',
+    oauthErrTitle: '登录失败',
+    oauthErrMsg: 'OAuth 登录过程中出错了，请重试或换一个方式下载。',
+    oauthRetry: '重试',
+    oauthSkip: '跳过登录（可能被拒绝）',
   },
   en: {
     pageTitle: 'Share · {site}',
@@ -210,6 +220,16 @@ const I18N = {
     turnstileFail: 'Verification failed, please retry',
     turnstileContinue: 'Continue download',
     turnstileDownloadNow: 'Download now',
+    // OAuth2
+    oauthLogin: 'Login with {provider}',
+    oauthLoggedInAs: 'Logged in via {provider}',
+    oauthLogout: 'Logout',
+    oauthContinueDownload: 'Continue to Download',
+    oauthHint: 'This resource requires third-party login to download',
+    oauthErrTitle: 'Login Failed',
+    oauthErrMsg: 'Something went wrong during OAuth login. Please retry.',
+    oauthRetry: 'Retry',
+    oauthSkip: 'Skip login (may be denied)',
   }
 };
 
@@ -309,6 +329,10 @@ async function renderTurnstile(containerEl, sitekey){
 }
 
 async function boot(){
+  // OAuth callback 返回的错误参数 → 页面顶部提示
+  const params = new URLSearchParams(location.search);
+  const oauthErr = params.get('oauth_error');
+
   let info;
   try{
     const r = await fetch(`/s/${token}/info`, {cache:'no-store'});
@@ -318,7 +342,7 @@ async function boot(){
   const siteName = info.site_title || 'cloud-r2pan';
   document.title = t('pageTitle', {site: siteName});
   $('#brand-text').innerHTML = `Powered by <b>${esc(siteName)}</b>`;
-  render(info, siteName);
+  render(info, siteName, oauthErr);
 }
 
 function renderError(title,msg){
@@ -328,7 +352,7 @@ function renderError(title,msg){
     <div class="hint" style="margin-top:12px">${esc(msg)}</div>`;
 }
 
-function render(d, siteName){
+function render(d, siteName, oauthErr){
   const ext = extOf(d.name);
   const gone = {
     gone:[t('goneTitle'), t('goneMsg')],
@@ -344,6 +368,38 @@ function render(d, siteName){
   const tsOnDownload = ts.mode === 'on_download' || ts.mode === 'both';
   const needTsNow = tsEnabled && ((tsOnShare && ts.needs_now) || (tsOnDownload));
 
+  // OAuth2 判断
+  const oauth = d.oauth || {enabled:false, provider:'', client_id:'', authed:false};
+  const oauthEnabled = oauth.enabled && oauth.provider && oauth.client_id;
+  const oauthAuthed = !!oauth.authed;
+  const providerName = (oauth.provider === 'custom' ? 'OAuth' : oauth.provider).replace(/^\w/, c => c.toUpperCase());
+  const oauthStartUrl = `/oauth/start?provider=${encodeURIComponent(oauth.provider)}&redirect=${encodeURIComponent(location.pathname)}`;
+
+  const oauthErrHtml = oauthErr ? `
+    <div class="warn">
+      🔐 ${esc(t('oauthErrTitle'))}<br>
+      <div style="margin-top:6px;font-size:12.5px;line-height:1.6">${esc(t('oauthErrMsg'))}</div>
+    </div>` : '';
+
+  // OAuth 登录按钮（未登录且 OAuth 启用）
+  const oauthLoginBlock = oauthEnabled && !oauthAuthed && !d.quota_exceeded ? `
+    <div class="oauth-block" style="margin-top:22px">
+      <div style="font-size:13px;color:rgba(255,255,255,.6);margin-bottom:10px">${esc(t('oauthHint'))}</div>
+      <a class="btn" href="${oauthStartUrl}" style="background:linear-gradient(180deg,#58a6ff,#1f6feb)">
+        ${oauth.provider==='github'?'<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><path d="M12 .5C5.73.5.75 5.48.75 11.75c0 4.97 3.22 9.19 7.69 10.68.56.1.77-.24.77-.54 0-.27-.01-1.16-.02-2.11-3.13.68-3.79-1.34-3.79-1.34-.51-1.3-1.25-1.64-1.25-1.64-1.02-.7.08-.68.08-.68 1.13.08 1.72 1.16 1.72 1.16 1 1.71 2.63 1.22 3.27.93.1-.73.39-1.22.71-1.5-2.5-.28-5.13-1.25-5.13-5.57 0-1.23.44-2.24 1.16-3.03-.12-.28-.5-1.43.11-2.99 0 0 .95-.3 3.11 1.15.9-.25 1.87-.37 2.83-.37.96 0 1.93.12 2.83.37 2.16-1.45 3.11-1.15 3.11-1.15.61 1.56.23 2.71.11 2.99.72.79 1.16 1.8 1.16 3.03 0 4.33-2.64 5.28-5.14 5.56.4.34.76 1.02.76 2.07 0 1.5-.01 2.71-.01 3.08 0 .3.21.65.78.54 4.46-1.49 7.68-5.71 7.68-10.68C23.25 5.48 18.27.5 12 .5z"/></svg>':oauth.provider==='google'?'<svg viewBox="0 0 24 24" width="19" height="19"><path fill="#EA4335" d="M12 10.2v3.9h5.5c-.24 1.4-1.7 4.1-5.5 4.1-3.3 0-6-2.7-6-6.1s2.7-6.1 6-6.1c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3 14.7 2 12 2 6.5 2 2 6.5 2 12s4.5 10 10 10c5.8 0 9.6-4.1 9.6-9.8 0-.7-.1-1.2-.2-1.7H12z"/></svg>':oauth.provider==='microsoft'?'<svg viewBox="0 0 24 24" width="19" height="19"><rect x="2" y="2" width="10" height="10" fill="#F25022"/><rect x="12" y="2" width="10" height="10" fill="#7FBA00"/><rect x="2" y="12" width="10" height="10" fill="#00A4EF"/><rect x="12" y="12" width="10" height="10" fill="#FFB900"/></svg>':oauth.provider==='discord'?'<svg viewBox="0 0 24 24" width="19" height="19" fill="#5865F2"><path d="M20.3 4.4A19.7 19.7 0 0 0 16.5 3l-.3.6a18 18 0 0 0-8.4 0L7.2 3c-1.3.2-2.6.8-3.8 1.4A20.3 20.3 0 0 0 1 17.6a20 20 0 0 0 6 3c.5-.6.9-1.3 1.3-2a12.8 12.8 0 0 1-2-.9c.2-.2.4-.3.5-.5a14.3 14.3 0 0 0 12.4 0c.2.2.4.3.5.5-.6.4-1.3.7-2 1 .4.7.8 1.4 1.3 2a20 20 0 0 0 6-3c.8-3 .6-6.1-.2-8.8zM8.1 14.5c-1 0-1.8-.9-1.8-2 0-1.1.8-2 1.8-2s1.8.9 1.8 2c0 1.1-.8 2-1.8 2zm7.8 0c-1 0-1.8-.9-1.8-2 0-1.1.8-2 1.8-2s1.8.9 1.8 2c0 1.1-.8 2-1.8 2z"/></svg>':'<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><path d="M12 1a11 11 0 1 0 0 22 11 11 0 0 0 0-22zm0 2a9 9 0 0 1 9 9c0 2.6-1.1 4.9-2.9 6.5-.7-1.4-2.1-2.3-3.7-2.3h-.5a5 5 0 0 0-3.5-1.4c-1.5 0-2.8.6-3.7 1.6A9 9 0 0 1 12 3zm0 5a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></svg>'}
+        ${esc(t('oauthLogin', {provider: providerName}))}
+      </a>
+    </div>` : '';
+
+  // OAuth 已登录 —— 继续下载 + 退出
+  const oauthAuthedBlock = oauthEnabled && oauthAuthed && !d.quota_exceeded ? `
+    <div class="oauth-block" style="margin-top:22px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:13px;color:#6ee7b7">✓ ${esc(t('oauthLoggedInAs', {provider: providerName}))}</div>
+        <button id="oauth-logout" style="background:none;border:none;color:rgba(255,255,255,.55);font-size:12px;cursor:pointer;padding:4px 8px;border-radius:8px">${esc(t('oauthLogout'))}</button>
+      </div>
+    </div>` : '';
+
   $('#app').innerHTML = `
     <div class="file-icon"><span class="ext" style="color:${extColor(d.name)}">${esc((ext||'FILE').toUpperCase())}</span></div>
     <h1>${esc(d.name)}</h1>
@@ -357,6 +413,9 @@ function render(d, siteName){
       <div class="stat"><div class="v">${d.max_downloads??'∞'}</div><div class="k">${esc(t('limit'))}</div></div>
       <div class="stat"><div class="v">${fmtSize(d.size)}</div><div class="k">${esc(t('size'))}</div></div>
     </div>
+    ${oauthErrHtml}
+    ${oauthLoginBlock}
+    ${oauthAuthedBlock}
     ${d.quota_exceeded?`<div class="warn">${esc(t('quotaWarn'))}</div>`:''}
 
     ${needTsNow && !d.quota_exceeded ? `
@@ -376,19 +435,35 @@ function render(d, siteName){
         </a>
         <div class="pw-hint">${esc(t('unlockHint'))}</div>
       </div>`
-      :`<a class="btn" id="dl" href="javascript:void(0)" ${d.quota_exceeded?'style="pointer-events:none;opacity:.45"':''}>
+      :`<a class="btn" id="dl" href="javascript:void(0)" ${d.quota_exceeded?'style="pointer-events:none;opacity:.45"':''} ${oauthEnabled && !oauthAuthed?'style="pointer-events:none;opacity:.45"':''}>
         <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4 20h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         ${esc(t('download'))}
       </a>
       <div class="hint">${esc(t('hint', {site: siteName}))}</div>`}
   `;
 
-  // 下载按钮绑定
-  if(!d.needs_password && !d.quota_exceeded){
-    $('#dl').onclick = () => triggerDownload(d, ts, tsEnabled, tsOnDownload);
+  // OAuth 登录/退出按钮绑定
+  if(oauthEnabled){
+    $('#oauth-logout')?.addEventListener('click', async () => {
+      await fetch('/oauth/logout', {method:'POST', credentials:'same-origin'});
+      location.reload();
+    });
   }
 
-  if(d.needs_password && $('#pw')) wireUnlock(d, ts, tsEnabled, tsOnDownload);
+  // OAuth 登录按钮：直接是 <a> 标签跳到 oauthStartUrl，不需要额外绑定
+  // 下载按钮绑定（OAuth 未登录时禁用）
+  if(!d.needs_password && !d.quota_exceeded){
+    $('#dl').onclick = () => {
+      if(oauthEnabled && !oauthAuthed){
+        // 被禁用的按钮 —— 做个轻量提示然后跳到登录
+        location.href = oauthStartUrl;
+        return;
+      }
+      triggerDownload(d, ts, tsEnabled, tsOnDownload);
+    };
+  }
+
+  if(d.needs_password && $('#pw')) wireUnlock(d, ts, tsEnabled, tsOnDownload, oauthEnabled, oauthAuthed, oauthStartUrl);
 
   // 如果 on_share 模式需要弹 Turnstile，现在就开始渲染
   if(needTsNow && tsOnShare && ts.sitekey){

@@ -3,6 +3,13 @@ import { ensureSchema } from "./db";
 import { handleAdminApi } from "./admin";
 import { handleDownload, handleShareInfo, handleVerify } from "./public";
 import { serveAdminPage, serveSharePage, errorPage } from "./pages";
+import {
+  handleOAuthStart,
+  handleOAuthCallback,
+  handleOAuthSession,
+  handleOAuthLogout,
+  handleOAuthProviders,
+} from "./oauth_handlers";
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -37,6 +44,25 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   // 管理 API
   if (path.startsWith("/api/admin/")) {
     return handleAdminApi(req, env, ctx, path);
+  }
+
+  // ══════════════ OAuth2 路由 ══════════════
+  await ensureSchema(env);
+
+  if (path === "/oauth/providers" && req.method === "GET") {
+    return handleOAuthProviders();
+  }
+  if (path === "/oauth/start" && req.method === "GET") {
+    return handleOAuthStart(req, env);
+  }
+  if (path === "/oauth/callback" && req.method === "GET") {
+    return handleOAuthCallback(req, env);
+  }
+  if (path === "/oauth/session" && req.method === "GET") {
+    return handleOAuthSession(req, env);
+  }
+  if (path === "/oauth/logout" && (req.method === "POST" || req.method === "GET")) {
+    return handleOAuthLogout(req);
   }
 
   // 公开分享页 /s/:token[...]

@@ -4,6 +4,7 @@ import { parseUA } from "./ua";
 import { clientIp } from "./auth";
 import { errorPage } from "./pages";
 import { hmacHex, sha256Hex, randomHex, safeEqual } from "./crypto";
+import { verifyOAuthSession } from "./oauth";
 
 const TOKEN_TTL_MS = 24 * 3600_000; // 授权令牌有效期 24h
 
@@ -156,6 +157,14 @@ export async function handleShareInfo(req: Request, env: Env, token: string): Pr
     }
   }
 
+  // OAuth2：检查是否已登录
+  let oauthAuthed = false;
+  let oauthProvider = settings.oauthEnabled ? settings.oauthProvider : "";
+  if (settings.oauthEnabled) {
+    const oauthCheck = await verifyOAuthSession(env, req.headers.get("cookie"));
+    oauthAuthed = oauthCheck.ok;
+  }
+
   return Response.json({
     status,
     name: row.name,
@@ -175,6 +184,12 @@ export async function handleShareInfo(req: Request, env: Env, token: string): Pr
       threshold: settings.turnstileThreshold,
       needs_now: needsTurnstile,
       visit_count: visitCount,
+    },
+    oauth: {
+      enabled: settings.oauthEnabled,
+      provider: oauthProvider,
+      client_id: settings.oauthClientId,
+      authed: oauthAuthed,
     },
   });
 }
@@ -333,7 +348,29 @@ export async function handleDownload(
 
   const settings = await getSettings(env);
 
-  // 2.6 Turnstile 下载验证码（on_download / both 模式）
+  // 2.6 OAuth2 下载鉴权
+  if (settings.oauthEnabled) {
+    const oauthResult = await verifyOAuthSession(env, req.headers.get("cookie"));
+    if (!oauthResult.ok) {
+      const providerName = settings.oauthProvider === "custom" ? "OAuth" : settings.oauthProvider;
+      const startUrl = `/oauth/start?provider=${encodeURIComponent(settings.oauthProvider)}&redirect=${encodeURIComponent("/s/" + token)}`;
+      return errorPage(
+        req,
+        401,
+        { zh: "需要登录", en: "OAuth Login Required" },
+        {
+          zh: `该资源需要通过 ${providerName} 账号登录后才能下载。`,
+          en: `This resource requires login with ${providerName} to download.`,
+        },
+        {
+          siteTitle: settings.siteTitle,
+          oauth_login_url: startUrl,
+        }
+      );
+    }
+  }
+
+  // 2.7 Turnstile 下载验证码（on_download / both 模式）
   if (isTurnstileEnabled(env, settings)) {
     const url = new URL(req.url);
     const mode = settings.turnstileMode;

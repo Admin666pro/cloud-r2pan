@@ -26,17 +26,21 @@ export function errorPage(
   status: number,
   title: L10n,
   message: L10n,
-  opts: { siteTitle?: string } = {}
+  opts: { siteTitle?: string; oauth_login_url?: string } = {}
 ): Response {
   const lang = pickLang(req);
   const site = esc(opts.siteTitle ?? "cloud-r2pan");
   const icons: Record<number, string> = {
+    401: "🔐",
     403: "🚫",
     404: "🔍",
     410: "⏳",
     416: "📏",
     503: "🛑",
   };
+  const loginBtn = opts.oauth_login_url
+    ? `<div style="margin-top:28px"><a href="${esc(opts.oauth_login_url)}" style="display:inline-block;padding:14px 40px;border-radius:18px;background:linear-gradient(180deg,#3d9bff,#0a7cff);color:#fff;text-decoration:none;font-weight:600;font-size:16px;box-shadow:0 12px 28px rgba(10,124,255,.4);transition:transform .15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='none'">${lang === "zh" ? "登录下载" : "Login to Download"}</a></div>`
+    : "";
   const html = `<!DOCTYPE html>
 <html lang="${lang === "zh" ? "zh-CN" : "en"}">
 <head>
@@ -86,6 +90,7 @@ p { font-size: 15px; line-height: 1.65; color: rgba(255,255,255,.78); }
   <div class="icon">${icons[status] ?? "⚠️"}</div>
   <h1>${esc(title[lang])}</h1>
   <p>${esc(message[lang])}</p>
+  ${loginBtn}
   <div class="code">HTTP ${status}</div>
 </div>
 <div class="brand">Powered by ${site}</div>

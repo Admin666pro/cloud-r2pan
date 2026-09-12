@@ -686,6 +686,7 @@ export async function handleAdminApi(
   // ── 读取设置 ──────────────────────────────────────
   if (path === "/api/admin/settings" && method === "GET") {
     const s = await getSettings(env);
+    const oauthSecretConfigured = !!s.oauthClientSecretCipher;
     return json({
       site_title: s.siteTitle,
       traffic_limit_gb: s.trafficLimitBytes / 1024 ** 3,
@@ -700,6 +701,16 @@ export async function handleAdminApi(
       turnstile_sitekey_override: s.turnstileSitekeyOverride,
       cloudflare_turnstile_sitekey: !!env.turnstile_sitekey,
       cloudflare_turnstile_secret: !!env.turnstile_secret,
+      // OAuth2
+      oauth_enabled: s.oauthEnabled,
+      oauth_provider: s.oauthProvider,
+      oauth_client_id: s.oauthClientId,
+      oauth_scope: s.oauthScope,
+      oauth_secret_configured: oauthSecretConfigured,
+      oauth_custom_authorize_url: s.oauthCustomAuthorizeUrl,
+      oauth_custom_token_url: s.oauthCustomTokenUrl,
+      oauth_custom_userinfo_url: s.oauthCustomUserinfoUrl,
+      oauth_custom_token_field: s.oauthCustomTokenField,
     });
   }
 
@@ -732,6 +743,51 @@ export async function handleAdminApi(
       // 允许清空
       patch.turnstile_sitekey_override = body.turnstile_sitekey_override.trim();
     }
+    // OAuth2
+    if (typeof body.oauth_enabled === "boolean") patch.oauth_enabled = body.oauth_enabled ? "1" : "0";
+    if (typeof body.oauth_provider === "string" && body.oauth_provider.trim()) {
+      const valid = ["github", "google", "microsoft", "discord", "custom"];
+      if (valid.includes(body.oauth_provider.trim())) {
+        patch.oauth_provider = body.oauth_provider.trim();
+      }
+    }
+    if (typeof body.oauth_client_id === "string") patch.oauth_client_id = body.oauth_client_id.trim();
+    if (typeof body.oauth_scope === "string") patch.oauth_scope = body.oauth_scope.trim();
+    // Client Secret —— 如果前端传了新密码则加密存；如果传空字符串则清掉
+    if (typeof body.oauth_client_secret === "string") {
+      const raw = body.oauth_client_secret.trim();
+      if (raw === "") {
+        patch.oauth_client_secret_cipher = "";
+      } else {
+        const cipher = await encryptSecret(raw, env.admin);
+        if (cipher) patch.oauth_client_secret_cipher = cipher;
+      }
+    }
+    // 自定义 Provider URL
+    if (typeof body.oauth_custom_authorize_url === "string")
+      patch.oauth_custom_authorize_url = body.oauth_custom_authorize_url.trim();
+    if (typeof body.oauth_custom_token_url === "string")
+      patch.oauth_custom_token_url = body.oauth_custom_token_url.trim();
+    if (typeof body.oauth_custom_userinfo_url === "string")
+      patch.oauth_custom_userinfo_url = body.oauth_custom_userinfo_url.trim();
+    if (typeof body.oauth_custom_token_field === "string" && body.oauth_custom_token_field.trim())
+      patch.oauth_custom_token_field = body.oauth_custom_token_field.trim();
+
+    // 如果启用 OAuth 但没配置 client_id / secret，返回警告
+    const willEnable = patch.oauth_enabled === "1";
+    const cur = await getSettings(env);
+    const finalClientId = patch.oauth_client_id ?? cur.oauthClientId;
+    const finalSecret = patch.oauth_client_secret_cipher ?? cur.oauthClientSecretCipher;
+    const providerId = patch.oauth_provider ?? cur.oauthProvider;
+    if (willEnable && (!finalClientId || !finalSecret)) {
+      await updateSettings(env, patch);
+      return json({
+        ok: true,
+        warnings: ["oauth_incomplete"],
+        message: "OAuth2 已启用，但 client_id 或 client_secret 未完全配置。管理员需完成配置后才能生效。",
+      });
+    }
+
     await updateSettings(env, patch);
     return json({ ok: true });
   }
