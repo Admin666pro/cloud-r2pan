@@ -487,6 +487,24 @@ const I18N = {
     oauthTest: '测试配置',
     oauthTestOk: 'OAuth2 配置有效',
     oauthTestFail: 'OAuth2 配置不完整或有错误',
+    // 新增多 Provider 相关
+    configureTurnstile: '配置 Turnstile',
+    oauthNoProviders: '还没有配置任何 OAuth2 Provider',
+    oauthEnabledN: '已启用 {n} 个 Provider',
+    oauthNoEnabled: '总开关已打开，但没有启用任何 Provider',
+    oauthDisabled: '未启用',
+    oauthConfigure: '⚙️ 配置',
+    oauthEnable: '启用',
+    oauthDisable: '禁用',
+    oauthAddProvider: '添加 Provider',
+    oauthEditTitle: '编辑 OAuth2 Provider',
+    oauthAddTitle: '添加 OAuth2 Provider',
+    oauthLabel: '显示名称',
+    oauthKeepSecret: '保持现有 Secret 不变',
+    confirmDeleteTitle: '确认删除',
+    confirmOAuthDeleteD: '删除后此 Provider 的配置将永久删除。已生成的 OAuth2 会话不受影响，但新登录请求将无法使用此 Provider。确定删除吗？',
+    custom: '自定义',
+    cancel: '取消',
   },
   en: {
     docTitle: '{site} · Admin Console',
@@ -658,6 +676,22 @@ const I18N = {
     oauthTest: 'Test Configuration',
     oauthTestOk: 'OAuth2 configuration looks valid',
     oauthTestFail: 'OAuth2 is incomplete or has errors',
+    configureTurnstile: 'Configure Turnstile',
+    oauthNoProviders: 'No OAuth2 providers configured yet',
+    oauthEnabledN: '{n} provider(s) enabled',
+    oauthNoEnabled: 'Master switch is ON but no provider is enabled',
+    oauthDisabled: 'Disabled',
+    oauthConfigure: '⚙️ Configure',
+    oauthEnable: 'Enable',
+    oauthDisable: 'Disable',
+    oauthAddProvider: 'Add Provider',
+    oauthEditTitle: 'Edit OAuth2 Provider',
+    oauthAddTitle: 'Add OAuth2 Provider',
+    oauthLabel: 'Display Name',
+    oauthKeepSecret: 'Keep existing secret unchanged',
+    confirmDeleteTitle: 'Confirm Delete',
+    confirmOAuthDeleteD: 'This provider config will be permanently deleted. Existing OAuth sessions remain valid, but new login requests cannot use this provider. Are you sure?',
+    custom: 'Custom',
   }
 };
 
@@ -1256,8 +1290,8 @@ async function loadLogs(){
     </div>`;
   let timer;
   $('#log-q').oninput = e => { clearTimeout(timer); timer = setTimeout(() => { logsQuery = e.target.value.trim(); logsPage = 1; loadLogs(); }, 350); };
-  $('#pg-prev').onclick = () => { logsPage--; loadLogs(); };
-  $('#pg-next').onclick = () => { logsPage++; loadLogs(); };
+  $('#pg-prev')?.addEventListener('click', () => { logsPage--; loadLogs(); });
+  $('#pg-next')?.addEventListener('click', () => { logsPage++; loadLogs(); });
   $('#clear-30').onclick = async () => {
     if(!(await confirmDialog(t('confirmClear30T'), t('confirmClear30D')))) return;
     const r = await api('/api/admin/logs?mode=older&days=30', { method:'DELETE' });
@@ -1479,119 +1513,88 @@ async function loadSettings(){
         }
       </div>
     </div>
-    <!-- Turnstile 组 -->
+    <!-- Turnstile 组 —— 状态摘要 + 配置按钮 -->
     <div class="glass group">
       <div class="row">
-        <div class="info"><div class="t">${esc(t('tsGroupTitle'))}</div>
-        <div class="d">${esc(t('tsGroupD'))}</div></div>
-      </div>
-      <div class="row">
-        <label>${esc(t('tsMode'))}</label>
-        <select id="ts-mode" style="padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
-          <option value="off" ${s.turnstile_mode==='off'?'selected':''} style="color:#111">${esc(t('tsModeOff'))}</option>
-          <option value="on_share" ${s.turnstile_mode==='on_share'?'selected':''} style="color:#111">${esc(t('tsModeShare'))}</option>
-          <option value="on_download" ${s.turnstile_mode==='on_download'?'selected':''} style="color:#111">${esc(t('tsModeDownload'))}</option>
-          <option value="both" ${s.turnstile_mode==='both'?'selected':''} style="color:#111">${esc(t('tsModeBoth'))}</option>
-        </select>
-      </div>
-      <div class="row">
-        <label>${esc(t('tsThreshold'))}</label>
-        <input type="number" id="ts-threshold" min="0" max="10000" value="${s.turnstile_threshold ?? 5}" style="width:120px;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;text-align:center">
-      </div>
-      <div class="row" style="flex-direction:column;align-items:flex-start">
-        <div style="font-size:12px;color:var(--text-3);line-height:1.6">
-          ${esc(t('tsThresholdHelp'))}<br>
-          ${s.cloudflare_turnstile_secret ? `<span style="color:#6ee7b7">${esc(t('tsSecretOk'))}</span>` : `<span style="color:#fda293">${esc(t('tsSecretMissing'))} — ${esc(t('tsSecretHint'))}</span>`}<br>
-          ${s.cloudflare_turnstile_sitekey ? `<span style="color:#6ee7b7">${esc(t('tsSitekeyCloudflareOk'))}</span>` : `<span style="color:#fde68a">${esc(t('tsSitekeyCloudflareMissing'))}</span>`}
+        <div class="info">
+          <div class="t">${esc(t('tsGroupTitle'))}</div>
+          <div class="d" style="font-size:12px;line-height:1.6">
+            <div>${esc(t('tsGroupD'))}</div>
+            <div style="margin-top:6px">
+              <span style="color:${s.turnstile_mode==='off'?'#a5b4fc':'#6ee7b7'}">${esc(t('tsMode'))}: ${s.turnstile_mode}</span>
+              · <span>${esc(t('tsThreshold'))}: ${s.turnstile_threshold ?? 5}</span>
+              · ${s.cloudflare_turnstile_secret ? `<span style="color:#6ee7b7">✓ ${esc(t('tsSecretOk'))}</span>` : `<span style="color:#fda293">⚠ ${esc(t('tsSecretMissing'))}</span>`}
+              · ${s.cloudflare_turnstile_sitekey ? `<span style="color:#6ee7b7">✓ Sitekey Cloudflare</span>` : (s.turnstile_sitekey_override ? `<span style="color:#a5d8ff">✓ Sitekey Override</span>` : `<span style="color:#fde68a">⚠ Sitekey Missing</span>`)}
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="row">
-        <label>${esc(t('tsSitekeyOverride'))}</label>
-        <input type="text" id="ts-sitekey" value="${esc(s.turnstile_sitekey_override ?? '')}" placeholder="0xAAAA..." style="flex:1;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
+        <button class="btn sm primary" id="ts-configure" style="padding:10px 22px;font-size:13px;border-radius:14px">⚙️ ${esc(t('configureTurnstile'))}</button>
       </div>
       <div class="row" style="justify-content:flex-end">
         <button class="btn sm" id="ts-reset">${esc(t('tsResetVisits'))}</button>
       </div>
     </div>
-    <!-- OAuth2 组 -->
+    <!-- OAuth2 组 —— 总开关 + Provider 卡片列表 -->
     <div class="glass group">
       <div class="row">
         <div class="info"><div class="t">${esc(t('oauthGroupTitle'))}</div>
-        <div class="d">${esc(t('oauthGroupD'))}</div></div>
+          <div class="d" style="font-size:12px;line-height:1.6">
+            ${esc(t('oauthGroupD'))}
+            <div style="margin-top:6px">
+              ${s.oauth_enabled
+                ? (s.oauth_has_enabled_providers
+                    ? `<span style="color:#6ee7b7">✓ ${esc(t('oauthEnabledN',{n:s.oauth_providers?.length||0}))}</span>`
+                    : `<span style="color:#fda293">⚠ ${esc(t('oauthNoEnabled'))}</span>`)
+                : `<span style="color:#a5b4fc">${esc(t('oauthDisabled'))}</span>`}
+            </div>
+          </div>
+        </div>
         <label class="switch"><input type="checkbox" id="oauth-enabled" ${s.oauth_enabled?'checked':''}><span class="track"><span class="thumb"></span></span></label>
       </div>
-      <div class="row">
-        <label>${esc(t('oauthProvider'))}</label>
-        <select id="oauth-provider" style="padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
-          <option value="github" ${s.oauth_provider==='github'?'selected':''} style="color:#111">GitHub</option>
-          <option value="google" ${s.oauth_provider==='google'?'selected':''} style="color:#111">Google</option>
-          <option value="microsoft" ${s.oauth_provider==='microsoft'?'selected':''} style="color:#111">Microsoft</option>
-          <option value="discord" ${s.oauth_provider==='discord'?'selected':''} style="color:#111">Discord</option>
-          <option value="custom" ${s.oauth_provider==='custom'?'selected':''} style="color:#111">Custom / 自定义</option>
-        </select>
+      <!-- Provider 卡片列表 -->
+      <div id="oauth-providers-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:6px">
+        ${(s.oauth_providers && s.oauth_providers.length) ? s.oauth_providers.map(p => `
+          <div class="oauth-provider-card" data-oauth-id="${esc(p.id)}" style="padding:14px;border-radius:14px;background:rgba(255,255,255,.05);border:1px solid ${p.enabled ? 'rgba(110,231,183,.35)' : 'rgba(255,255,255,.1)'}">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+              <div style="font-weight:600;font-size:14px">${esc(p.label)} <span style="font-size:11px;color:var(--text-3);font-weight:400">${esc(p.provider_type)}</span></div>
+              <span class="tag ${p.enabled?'active':''}" style="font-size:11px"><i></i>${p.enabled ? esc(t('oauthEnabled')) : esc(t('oauthDisabled'))}</span>
+            </div>
+            <div style="font-size:11.5px;color:var(--text-3);line-height:1.6">
+              <div><b>Client ID:</b> ${esc(p.client_id || '—')}</div>
+              <div><b>Secret:</b> <span style="${p.secret_configured?'color:#6ee7b7':'color:#fda293'}">${p.secret_configured ? esc(t('oauthSecretConfigured')) : esc(t('oauthSecretNotConfigured'))}</span></div>
+              <div><b>Scope:</b> ${esc(p.scope || '—')}</div>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:10px">
+              <button class="btn sm" data-oauth-config="${esc(p.id)}" style="flex:1;padding:6px 10px;font-size:12px;border-radius:10px">${esc(t('oauthConfigure'))}</button>
+              <button class="btn sm" data-oauth-toggle="${esc(p.id)}" style="padding:6px 10px;font-size:12px;border-radius:10px">${p.enabled ? esc(t('oauthDisable')) : esc(t('oauthEnable'))}</button>
+              <button class="btn sm danger" data-oauth-delete="${esc(p.id)}" style="padding:6px 10px;font-size:12px;border-radius:10px">🗑️</button>
+            </div>
+          </div>`).join('') : `<div style="grid-column:1/-1;text-align:center;color:var(--text-3);font-size:13px;padding:20px">${esc(t('oauthNoProviders'))}</div>`}
       </div>
-      <div class="row">
-        <label>${esc(t('oauthClientId'))}</label>
-        <input type="text" id="oauth-client-id" value="${esc(s.oauth_client_id ?? '')}" placeholder="${esc(t('oauthClientId'))}" style="flex:1;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
-      </div>
-      <div class="row" style="flex-direction:column;align-items:flex-start">
-        <div style="font-size:12.5px;color:var(--text-3);margin-bottom:6px">
-          ${esc(t('oauthClientSecret'))}: <span style="${s.oauth_secret_configured?'color:#6ee7b7':'color:#fda293'}">${s.oauth_secret_configured ? t('oauthSecretConfigured') : t('oauthSecretNotConfigured')}</span>
-        </div>
-        <input type="password" id="oauth-client-secret" placeholder="${s.oauth_secret_configured ? '(leave blank to keep)' : esc(t('oauthClientSecret'))}" style="width:100%;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
-        <div style="margin-top:4px;font-size:11.5px;color:var(--text-3)">${esc(t('oauthClientSecretHelp'))}</div>
-      </div>
-      <div class="row">
-        <label>${esc(t('oauthScope'))}</label>
-        <input type="text" id="oauth-scope" value="${esc(s.oauth_scope ?? '')}" placeholder="user:email" style="flex:1;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
-      </div>
-      <div class="row" style="flex-direction:column;align-items:flex-start">
-        <div style="font-size:12.5px;color:var(--text-3);line-height:1.6">
-          ${esc(t('oauthCallbackUrl'))}:<br>
-          <input type="text" readonly value="${esc(window.location.origin)}/oauth/callback" style="width:100%;margin-top:6px;padding:8px 12px;border-radius:10px;font-size:12px;color:#a5d8ff;background:rgba(0,0,0,.3);border:1px solid var(--stroke);outline:none;font-family:ui-monospace,'SF Mono',monospace" onclick="this.select()">
-          <div style="margin-top:4px">${esc(t('oauthCallbackHint'))}</div>
-        </div>
-      </div>
-      <div id="oauth-custom-fields" style="display:${s.oauth_provider==='custom'?'block':'none'}">
-        <div class="row">
-          <label>${esc(t('oauthCustomAuthorize'))}</label>
-          <input type="text" id="oauth-custom-authorize" value="${esc(s.oauth_custom_authorize_url ?? '')}" placeholder="https://provider.com/oauth/authorize" style="flex:1;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
-        </div>
-        <div class="row">
-          <label>${esc(t('oauthCustomToken'))}</label>
-          <input type="text" id="oauth-custom-token" value="${esc(s.oauth_custom_token_url ?? '')}" placeholder="https://provider.com/oauth/token" style="flex:1;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
-        </div>
-        <div class="row">
-          <label>${esc(t('oauthCustomUserinfo'))}</label>
-          <input type="text" id="oauth-custom-userinfo" value="${esc(s.oauth_custom_userinfo_url ?? '')}" placeholder="https://provider.com/userinfo" style="flex:1;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
-        </div>
-        <div class="row">
-          <label>${esc(t('oauthCustomTokenField'))}</label>
-          <input type="text" id="oauth-custom-token-field" value="${esc(s.oauth_custom_token_field ?? '')}" placeholder="access_token" style="flex:1;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
-        </div>
+      <div class="row" style="justify-content:flex-end;margin-top:10px">
+        <button class="btn primary" id="oauth-add" style="padding:10px 20px;font-size:13px;border-radius:14px">+ ${esc(t('oauthAddProvider'))}</button>
       </div>
     </div>
     <button class="btn primary" id="st-save" style="padding:14px 28px;font-size:15px;border-radius:18px">${esc(t('save'))}</button>`;
 
-  $('#st-reset-traffic').onclick = async () => {
+  $('#st-reset-traffic')?.addEventListener('click', async () => {
     if(!(await confirmDialog(t('confirmResetT'), t('confirmResetD'), false))) return;
     await api('/api/admin/traffic/reset', { method:'POST' });
     toast(t('trafficResetOk'));
     loadSettings();
-  };
-  $('#st-clear-30').onclick = async () => {
+  });
+  $('#st-clear-30')?.addEventListener('click', async () => {
     if(!(await confirmDialog(t('confirmClear30T'), t('confirmClear30D')))) return;
     const r = await api('/api/admin/logs?mode=older&days=30', { method:'DELETE' });
     toast(t('clearedN', {n: r.deleted}));
-  };
-  $('#st-clear-all').onclick = async () => {
+  });
+  $('#st-clear-all')?.addEventListener('click', async () => {
     if(!(await confirmDialog(t('confirmClearAllT'), t('confirmClearAllD')))) return;
     const r = await api('/api/admin/logs?mode=all', { method:'DELETE' });
     toast(t('clearedN', {n: r.deleted}));
-  };
-  $('#st-save').onclick = async () => {
-    // OAuth Secret 处理：空表示保留原值，非空表示更新
-    const oauthSecretInput = $('#oauth-client-secret').value.trim();
+  });
+  $('#st-save')?.addEventListener('click', async () => {
+    // 现在只保存非 Modal 的设置项；Turnstile 和 OAuth Provider 在各自 Modal 里保存
     const body = {
       site_title: $('#st-title').value.trim(),
       traffic_limit_gb: Number($('#st-limit').value) || 0,
@@ -1599,33 +1602,60 @@ async function loadSettings(){
       count_window_hours: Number($('#st-window').value) || 0,
       auto_ban: $('#st-autoban').checked,
       ban_hours: Number($('#st-banhours').value) || 0,
-      // Turnstile
-      turnstile_mode: $('#ts-mode').value,
-      turnstile_threshold: Number($('#ts-threshold').value) || 0,
-      turnstile_sitekey_override: $('#ts-sitekey').value.trim(),
-      // OAuth2
       oauth_enabled: $('#oauth-enabled').checked,
-      oauth_provider: $('#oauth-provider').value,
-      oauth_client_id: $('#oauth-client-id').value.trim(),
-      oauth_scope: $('#oauth-scope').value.trim(),
-      oauth_client_secret: oauthSecretInput || undefined,
-      oauth_custom_authorize_url: $('#oauth-custom-authorize')?.value.trim() || '',
-      oauth_custom_token_url: $('#oauth-custom-token')?.value.trim() || '',
-      oauth_custom_userinfo_url: $('#oauth-custom-userinfo')?.value.trim() || '',
-      oauth_custom_token_field: $('#oauth-custom-token-field')?.value.trim() || '',
     };
-    const r = await api('/api/admin/settings', { method:'PUT', body: JSON.stringify(body) });
-    if(r.warnings && r.warnings.includes('oauth_incomplete')){
-      toast(t('oauthTestFail'), 'err');
-    } else {
-      toast(t('saved'));
-    }
+    await api('/api/admin/settings', { method:'PUT', body: JSON.stringify(body) });
+    toast(t('saved'));
     loadSettings();
-  };
+  });
 
-  // OAuth Provider 切换：显示/隐藏自定义字段
-  $('#oauth-provider')?.addEventListener('change', () => {
-    $('#oauth-custom-fields').style.display = $('#oauth-provider').value === 'custom' ? 'block' : 'none';
+  // ═══════════════════════════════════
+  // Turnstile 配置 Modal
+  // ═══════════════════════════════════
+  $('#ts-configure')?.addEventListener('click', async () => {
+    const s = await api('/api/admin/settings');
+    openModal(`
+      <h3>⚙️ ${esc(t('configureTurnstile'))}</h3>
+      <div class="sub">${esc(t('tsGroupD'))}</div>
+      <div class="field" style="margin-top:14px">
+        <label>${esc(t('tsMode'))}</label>
+        <select id="ts-m" style="width:100%;padding:10px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
+          <option value="off" ${s.turnstile_mode==='off'?'selected':''} style="color:#111">${esc(t('tsModeOff'))}</option>
+          <option value="on_share" ${s.turnstile_mode==='on_share'?'selected':''} style="color:#111">${esc(t('tsModeShare'))}</option>
+          <option value="on_download" ${s.turnstile_mode==='on_download'?'selected':''} style="color:#111">${esc(t('tsModeDownload'))}</option>
+          <option value="both" ${s.turnstile_mode==='both'?'selected':''} style="color:#111">${esc(t('tsModeBoth'))}</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>${esc(t('tsThreshold'))}</label>
+        <input type="number" id="ts-th" min="0" max="10000" value="${s.turnstile_threshold ?? 5}" style="width:100%;padding:10px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
+        <div class="tip">${esc(t('tsThresholdHelp'))}</div>
+      </div>
+      <div class="field">
+        <label>${esc(t('tsSitekeyOverride'))}</label>
+        <input type="text" id="ts-sko" value="${esc(s.turnstile_sitekey_override ?? '')}" placeholder="0xAAAA..." style="width:100%;padding:10px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
+        <div class="tip" style="line-height:1.6">
+          ${s.cloudflare_turnstile_secret ? `<span style="color:#6ee7b7">✓ ${esc(t('tsSecretOk'))}</span>` : `<span style="color:#fda293">⚠ ${esc(t('tsSecretMissing'))} — ${esc(t('tsSecretHint'))}</span>`}<br>
+          ${s.cloudflare_turnstile_sitekey ? `<span style="color:#6ee7b7">✓ Sitekey 在 Cloudflare Secret 中</span>` : `<span style="color:#fde68a">⚠ Sitekey 未在 Cloudflare Secret 中，需要在上方 Override 里填写</span>`}
+        </div>
+      </div>
+      <div class="actions" style="margin-top:18px">
+        <button class="btn" data-x>${esc(t('cancel'))}</button>
+        <button class="btn primary" id="ts-save">${esc(t('save'))}</button>
+      </div>
+    `);
+    $('[data-x]')?.addEventListener('click', closeModal);
+    $('#ts-save')?.addEventListener('click', async () => {
+      const body = {
+        turnstile_mode: $('#ts-m').value,
+        turnstile_threshold: Number($('#ts-th').value) || 0,
+        turnstile_sitekey_override: $('#ts-sko').value.trim(),
+      };
+      await api('/api/admin/settings', { method:'PUT', body: JSON.stringify(body) });
+      closeModal();
+      toast(t('saved'));
+      loadSettings();
+    });
   });
 
   // Turnstile 重置访问计数
@@ -1633,6 +1663,146 @@ async function loadSettings(){
     if(!(await confirmDialog(t('tsResetVisits'), t('tsResetVisitsD'), false))) return;
     await api('/api/admin/turnstile/visits', { method:'DELETE' });
     toast(t('tsVisitsReset'));
+  });
+
+  // ═══════════════════════════════════
+  // OAuth2 Provider CRUD (Modal)
+  // ═══════════════════════════════════
+
+  const PROVIDER_PRESETS = {
+    github:   { name:'GitHub',    defaultScope:'user:email' },
+    google:   { name:'Google',    defaultScope:'openid email profile' },
+    microsoft:{ name:'Microsoft', defaultScope:'openid email profile User.Read' },
+    discord:  { name:'Discord',   defaultScope:'identify email' },
+    custom:   { name:'Custom',    defaultScope:'openid email profile' },
+  };
+  function openOauthProviderModal(row){
+    // row = null 表示新建，否则是已有数据
+    const editing = !!row;
+    const preset = PROVIDER_PRESETS[row?.provider_type || 'github'];
+    openModal(`
+      <h3>${esc(editing ? t('oauthEditTitle') : t('oauthAddTitle'))}</h3>
+      <div class="sub">${esc(t('oauthGroupD'))}</div>
+      <div class="field" style="margin-top:14px">
+        <label>${esc(t('oauthLabel'))}</label>
+        <input type="text" id="op-label" value="${esc(row?.label || preset.name)}" placeholder="${esc(t('oauthLabel'))}" style="width:100%">
+      </div>
+      <div class="field">
+        <label>${esc(t('oauthProvider'))}</label>
+        <select id="op-type" style="width:100%">
+          <option value="github" ${row?.provider_type==='github'?'selected':''} style="color:#111">GitHub</option>
+          <option value="google" ${row?.provider_type==='google'?'selected':''} style="color:#111">Google</option>
+          <option value="microsoft" ${row?.provider_type==='microsoft'?'selected':''} style="color:#111">Microsoft</option>
+          <option value="discord" ${row?.provider_type==='discord'?'selected':''} style="color:#111">Discord</option>
+          <option value="custom" ${row?.provider_type==='custom'?'selected':''} style="color:#111">Custom / ${esc(t('custom'))}</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>${esc(t('oauthClientId'))}</label>
+        <input type="text" id="op-cid" value="${esc(row?.client_id || '')}" placeholder="${esc(t('oauthClientId'))}" style="width:100%;font-family:ui-monospace,'SF Mono',monospace">
+      </div>
+      <div class="field">
+        <label>${esc(t('oauthClientSecret'))}</label>
+        <input type="password" id="op-secret" value="" placeholder="${row?.secret_configured ? esc(t('oauthKeepSecret')) : esc(t('oauthClientSecret'))}" style="width:100%;font-family:ui-monospace,'SF Mono',monospace">
+        <div class="tip">${esc(t('oauthClientSecretHelp'))}</div>
+      </div>
+      <div class="field">
+        <label>${esc(t('oauthScope'))}</label>
+        <input type="text" id="op-scope" value="${esc(row?.scope || preset.defaultScope)}" style="width:100%">
+      </div>
+      <div id="op-custom-block" style="display:${row?.provider_type==='custom'?'block':'none'}">
+        <div class="field">
+          <label>${esc(t('oauthCustomAuthorize'))}</label>
+          <input type="text" id="op-au" value="${esc(row?.custom_authorize_url || '')}" style="width:100%;font-family:ui-monospace,'SF Mono',monospace">
+        </div>
+        <div class="field">
+          <label>${esc(t('oauthCustomToken'))}</label>
+          <input type="text" id="op-tu" value="${esc(row?.custom_token_url || '')}" style="width:100%;font-family:ui-monospace,'SF Mono',monospace">
+        </div>
+        <div class="field">
+          <label>${esc(t('oauthCustomUserinfo'))}</label>
+          <input type="text" id="op-ui" value="${esc(row?.custom_userinfo_url || '')}" style="width:100%;font-family:ui-monospace,'SF Mono',monospace">
+        </div>
+        <div class="field">
+          <label>${esc(t('oauthCustomTokenField'))}</label>
+          <input type="text" id="oauth-ctf" value="${esc(row?.custom_token_field || 'access_token')}" style="width:100%;font-family:ui-monospace,'SF Mono',monospace">
+        </div>
+      </div>
+      <div class="field" style="margin-top:8px">
+        <div style="font-size:12px;color:var(--text-3);line-height:1.6">
+          ${esc(t('oauthCallbackUrl'))}:<br>
+          <input type="text" readonly value="${esc(window.location.origin)}/oauth/callback" style="width:100%;margin-top:4px;padding:8px 12px;border-radius:10px;font-size:12px;color:#a5d8ff;background:rgba(0,0,0,.3);border:1px solid var(--stroke);outline:none;font-family:ui-monospace,'SF Mono',monospace" onclick="this.select()">
+          <div style="margin-top:4px">${esc(t('oauthCallbackHint'))}</div>
+        </div>
+      </div>
+      <div class="actions" style="margin-top:18px">
+        <button class="btn" data-x>${esc(t('cancel'))}</button>
+        <button class="btn primary" id="op-save">${esc(t('save'))}</button>
+      </div>
+    `);
+    // Provider type 切换 → 显示/隐藏 Custom 块
+    $('#op-type')?.addEventListener('change', () => {
+      $('#op-custom-block').style.display = $('#op-type').value === 'custom' ? 'block' : 'none';
+      const preset = PROVIDER_PRESETS[$('#op-type').value];
+      if (preset && $('#op-scope')?.value === '') $('#op-scope').value = preset.defaultScope;
+    });
+    $('[data-x]')?.addEventListener('click', closeModal);
+    $('#op-save')?.addEventListener('click', async () => {
+      const body = {
+        label: $('#op-label').value.trim(),
+        provider_type: $('#op-type').value,
+        client_id: $('#op-cid').value.trim(),
+        scope: $('#op-scope').value.trim(),
+        enabled: row?.enabled !== false, // 默认启用
+      };
+      const secret = $('#op-secret').value.trim();
+      if (secret) body.client_secret = secret; // 非空则更新
+      else if (row?.secret_configured) body.client_secret = '__keep__'; // 编辑且未改密码 → 保留
+      else body.client_secret = ''; // 新建没填 → 空字符串不加密
+      if ($('#op-type').value === 'custom') {
+        body.custom_authorize_url = $('#op-au').value.trim();
+        body.custom_token_url = $('#op-tu').value.trim();
+        body.custom_userinfo_url = $('#op-ui').value.trim();
+        body.custom_token_field = $('#oauth-ctf').value.trim() || 'access_token';
+      }
+      try {
+        if (editing) {
+          await api(`/api/admin/oauth/providers/${row.id}`, { method:'PUT', body: JSON.stringify(body) });
+        } else {
+          await api('/api/admin/oauth/providers', { method:'POST', body: JSON.stringify(body) });
+        }
+        closeModal();
+        toast(t('saved'));
+        loadSettings();
+      } catch(err){ toast(err.message, 'err'); }
+    });
+  }
+
+  // 添加 Provider
+  $('#oauth-add')?.addEventListener('click', () => openOauthProviderModal(null));
+
+  // 列表里的按钮 —— 事件委托
+  $('#oauth-providers-grid')?.addEventListener('click', async (e) => {
+    const cfgBtn = e.target.closest('[data-oauth-config]');
+    const tglBtn = e.target.closest('[data-oauth-toggle]');
+    const delBtn = e.target.closest('[data-oauth-delete]');
+    if (!cfgBtn && !tglBtn && !delBtn) return;
+    const id = (cfgBtn || tglBtn || delBtn).dataset.oauthConfig || (cfgBtn || tglBtn || delBtn).dataset.oauthToggle || (cfgBtn || tglBtn || delBtn).dataset.oauthDelete;
+    if (!id) return;
+
+    if (cfgBtn) {
+      // 先拉一次完整数据再打开 Modal
+      const list = await api('/api/admin/oauth/providers');
+      const row = list.providers.find(p => p.id === id);
+      if (row) openOauthProviderModal(row);
+    } else if (tglBtn) {
+      await api(`/api/admin/oauth/providers/${id}/toggle`, { method:'POST' });
+      loadSettings();
+    } else if (delBtn) {
+      if (!(await confirmDialog(t('confirmDeleteTitle'), t('confirmOAuthDeleteD'), false))) return;
+      await api(`/api/admin/oauth/providers/${id}`, { method:'DELETE' });
+      loadSettings();
+    }
   });
 
   // 2FA Setup

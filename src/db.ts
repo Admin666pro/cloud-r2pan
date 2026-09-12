@@ -91,6 +91,22 @@ const SCHEMA_STATEMENTS: string[] = [
     expires_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_oauth_states_expires ON oauth_states(expires_at)`,
+  `CREATE TABLE IF NOT EXISTS oauth_providers (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    provider_type TEXT NOT NULL,
+    client_id TEXT NOT NULL DEFAULT '',
+    client_secret_cipher TEXT,
+    scope TEXT NOT NULL DEFAULT 'openid email profile',
+    custom_authorize_url TEXT NOT NULL DEFAULT '',
+    custom_token_url TEXT NOT NULL DEFAULT '',
+    custom_userinfo_url TEXT NOT NULL DEFAULT '',
+    custom_token_field TEXT NOT NULL DEFAULT 'access_token',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_oauth_providers_enabled ON oauth_providers(enabled)`,
 ];
 
 let schemaReady = false;

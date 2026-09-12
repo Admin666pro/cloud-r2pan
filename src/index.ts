@@ -50,7 +50,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   await ensureSchema(env);
 
   if (path === "/oauth/providers" && req.method === "GET") {
-    return handleOAuthProviders();
+    return handleOAuthProviders(req, env);
   }
   if (path === "/oauth/start" && req.method === "GET") {
     return handleOAuthStart(req, env);

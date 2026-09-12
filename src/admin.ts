@@ -686,7 +686,11 @@ export async function handleAdminApi(
   // ── 读取设置 ──────────────────────────────────────
   if (path === "/api/admin/settings" && method === "GET") {
     const s = await getSettings(env);
-    const oauthSecretConfigured = !!s.oauthClientSecretCipher;
+    // 读 OAuth2 providers 列表给前端展示卡片
+    const providers = await env.db
+      .prepare("SELECT id, label, provider_type, client_id, scope, enabled, updated_at FROM oauth_providers ORDER BY updated_at DESC")
+      .all<{ id: string; label: string; provider_type: string; client_id: string; scope: string; enabled: number; updated_at: number }>();
+    const enabledProviders = providers.results.filter((p) => p.enabled);
     return json({
       site_title: s.siteTitle,
       traffic_limit_gb: s.trafficLimitBytes / 1024 ** 3,
@@ -701,16 +705,18 @@ export async function handleAdminApi(
       turnstile_sitekey_override: s.turnstileSitekeyOverride,
       cloudflare_turnstile_sitekey: !!env.turnstile_sitekey,
       cloudflare_turnstile_secret: !!env.turnstile_secret,
-      // OAuth2
+      // OAuth2 总开关 + providers 概要
       oauth_enabled: s.oauthEnabled,
-      oauth_provider: s.oauthProvider,
-      oauth_client_id: s.oauthClientId,
-      oauth_scope: s.oauthScope,
-      oauth_secret_configured: oauthSecretConfigured,
-      oauth_custom_authorize_url: s.oauthCustomAuthorizeUrl,
-      oauth_custom_token_url: s.oauthCustomTokenUrl,
-      oauth_custom_userinfo_url: s.oauthCustomUserinfoUrl,
-      oauth_custom_token_field: s.oauthCustomTokenField,
+      oauth_providers: providers.results.map((p) => ({
+        id: p.id,
+        label: p.label,
+        provider_type: p.provider_type,
+        client_id: p.client_id,
+        scope: p.scope,
+        enabled: !!p.enabled,
+        secret_configured: true, // 列表里不暴露 secret 是否配，只在详情里展示
+      })),
+      oauth_has_enabled_providers: enabledProviders.length > 0,
     });
   }
 
@@ -743,50 +749,8 @@ export async function handleAdminApi(
       // 允许清空
       patch.turnstile_sitekey_override = body.turnstile_sitekey_override.trim();
     }
-    // OAuth2
+    // OAuth2 总开关（具体 provider 配置由 /api/admin/oauth/providers CRUD 管理）
     if (typeof body.oauth_enabled === "boolean") patch.oauth_enabled = body.oauth_enabled ? "1" : "0";
-    if (typeof body.oauth_provider === "string" && body.oauth_provider.trim()) {
-      const valid = ["github", "google", "microsoft", "discord", "custom"];
-      if (valid.includes(body.oauth_provider.trim())) {
-        patch.oauth_provider = body.oauth_provider.trim();
-      }
-    }
-    if (typeof body.oauth_client_id === "string") patch.oauth_client_id = body.oauth_client_id.trim();
-    if (typeof body.oauth_scope === "string") patch.oauth_scope = body.oauth_scope.trim();
-    // Client Secret —— 如果前端传了新密码则加密存；如果传空字符串则清掉
-    if (typeof body.oauth_client_secret === "string") {
-      const raw = body.oauth_client_secret.trim();
-      if (raw === "") {
-        patch.oauth_client_secret_cipher = "";
-      } else {
-        const cipher = await encryptSecret(raw, env.admin);
-        if (cipher) patch.oauth_client_secret_cipher = cipher;
-      }
-    }
-    // 自定义 Provider URL
-    if (typeof body.oauth_custom_authorize_url === "string")
-      patch.oauth_custom_authorize_url = body.oauth_custom_authorize_url.trim();
-    if (typeof body.oauth_custom_token_url === "string")
-      patch.oauth_custom_token_url = body.oauth_custom_token_url.trim();
-    if (typeof body.oauth_custom_userinfo_url === "string")
-      patch.oauth_custom_userinfo_url = body.oauth_custom_userinfo_url.trim();
-    if (typeof body.oauth_custom_token_field === "string" && body.oauth_custom_token_field.trim())
-      patch.oauth_custom_token_field = body.oauth_custom_token_field.trim();
-
-    // 如果启用 OAuth 但没配置 client_id / secret，返回警告
-    const willEnable = patch.oauth_enabled === "1";
-    const cur = await getSettings(env);
-    const finalClientId = patch.oauth_client_id ?? cur.oauthClientId;
-    const finalSecret = patch.oauth_client_secret_cipher ?? cur.oauthClientSecretCipher;
-    const providerId = patch.oauth_provider ?? cur.oauthProvider;
-    if (willEnable && (!finalClientId || !finalSecret)) {
-      await updateSettings(env, patch);
-      return json({
-        ok: true,
-        warnings: ["oauth_incomplete"],
-        message: "OAuth2 已启用，但 client_id 或 client_secret 未完全配置。管理员需完成配置后才能生效。",
-      });
-    }
 
     await updateSettings(env, patch);
     return json({ ok: true });
@@ -808,6 +772,200 @@ export async function handleAdminApi(
       traffic_used_bytes: "0",
       traffic_month: new Date().toISOString().slice(0, 7),
     });
+    return json({ ok: true });
+  }
+
+  // ══════════════════════════════════════════════════════
+  // OAuth2 Provider CRUD —— 多 Provider 管理
+  //   GET    /api/admin/oauth/providers             列表
+  //   POST   /api/admin/oauth/providers             创建
+  //   GET    /api/admin/oauth/providers/:id          详情
+  //   PUT    /api/admin/oauth/providers/:id          更新
+  //   DELETE /api/admin/oauth/providers/:id          删除
+  //   POST   /api/admin/oauth/providers/:id/toggle   启用/禁用
+  // ══════════════════════════════════════════════════════
+
+  const oauthProvidersPath = "/api/admin/oauth/providers";
+  const m = path.match(/^\/api\/admin\/oauth\/providers\/([^/]+)(\/(toggle))?$/);
+
+  // GET /api/admin/oauth/providers —— 列表（返回不含 secret 的安全摘要）
+  if (path === oauthProvidersPath && method === "GET") {
+    const rows = await env.db
+      .prepare("SELECT id, label, provider_type, client_id, scope, custom_authorize_url, custom_token_url, custom_userinfo_url, custom_token_field, enabled, client_secret_cipher IS NOT NULL as has_secret, created_at, updated_at FROM oauth_providers ORDER BY updated_at DESC")
+      .all<{ id: string; label: string; provider_type: string; client_id: string; scope: string; custom_authorize_url: string; custom_token_url: string; custom_userinfo_url: string; custom_token_field: string; enabled: number; has_secret: number; created_at: number; updated_at: number }>();
+    return json({
+      providers: rows.results.map((p) => ({
+        id: p.id,
+        label: p.label,
+        provider_type: p.provider_type,
+        client_id: p.client_id,
+        scope: p.scope,
+        custom_authorize_url: p.custom_authorize_url,
+        custom_token_url: p.custom_token_url,
+        custom_userinfo_url: p.custom_userinfo_url,
+        custom_token_field: p.custom_token_field,
+        enabled: !!p.enabled,
+        secret_configured: !!p.has_secret,
+        created_at: p.created_at,
+        updated_at: p.updated_at,
+      })),
+    });
+  }
+
+  // POST /api/admin/oauth/providers —— 创建
+  if (path === oauthProvidersPath && method === "POST") {
+    const body = await readJson<{
+      label?: string;
+      provider_type?: string;
+      client_id?: string;
+      client_secret?: string;
+      scope?: string;
+      custom_authorize_url?: string;
+      custom_token_url?: string;
+      custom_userinfo_url?: string;
+      custom_token_field?: string;
+      enabled?: boolean;
+    }>(req);
+    const validTypes = ["github", "google", "microsoft", "discord", "custom"];
+    const providerType = (body.provider_type && validTypes.includes(body.provider_type))
+      ? body.provider_type
+      : "github";
+    const label = (body.label || providerType).trim().slice(0, 40);
+    const clientId = (body.client_id || "").trim();
+    if (!clientId) return json({ error: "client_id_required" }, 400);
+    const scope = (body.scope || "").trim() || "openid email profile";
+    const now = Date.now();
+    const id = randomId();
+    let secretCipher: string | null = null;
+    if (body.client_secret && body.client_secret.trim()) {
+      secretCipher = await encryptSecret(body.client_secret.trim(), env.admin);
+      if (!secretCipher) return json({ error: "secret_encrypt_failed" }, 500);
+    }
+    await env.db
+      .prepare(
+        `INSERT INTO oauth_providers(id, label, provider_type, client_id, client_secret_cipher, scope,
+            custom_authorize_url, custom_token_url, custom_userinfo_url, custom_token_field,
+            enabled, created_at, updated_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)`
+      )
+      .bind(
+        id,
+        label,
+        providerType,
+        clientId,
+        secretCipher,
+        scope,
+        (body.custom_authorize_url || "").trim(),
+        (body.custom_token_url || "").trim(),
+        (body.custom_userinfo_url || "").trim(),
+        (body.custom_token_field || "access_token").trim(),
+        body.enabled === false ? 0 : 1,
+        now,
+        now
+      )
+      .run();
+    return json({ ok: true, id });
+  }
+
+  // PUT /api/admin/oauth/providers/:id —— 更新
+  if (m && !m[3] && method === "PUT") {
+    const id = m[1];
+    const row = await env.db
+      .prepare("SELECT * FROM oauth_providers WHERE id = ?1")
+      .bind(id)
+      .first<Record<string, unknown>>();
+    if (!row) return json({ error: "not_found" }, 404);
+    const body = await readJson<{
+      label?: string;
+      provider_type?: string;
+      client_id?: string;
+      client_secret?: string; // 非空=更新；空字符串=清除；不传=保留
+      scope?: string;
+      custom_authorize_url?: string;
+      custom_token_url?: string;
+      custom_userinfo_url?: string;
+      custom_token_field?: string;
+      enabled?: boolean;
+    }>(req);
+
+    const now = Date.now();
+    const updates: string[] = ["updated_at = ?1"];
+    const values: unknown[] = [now];
+
+    if (typeof body.label === "string" && body.label.trim()) {
+      updates.push("label = ?" + (values.length + 1));
+      values.push(body.label.trim().slice(0, 40));
+    }
+    if (typeof body.provider_type === "string") {
+      const valid = ["github", "google", "microsoft", "discord", "custom"];
+      if (valid.includes(body.provider_type)) {
+        updates.push("provider_type = ?" + (values.length + 1));
+        values.push(body.provider_type);
+      }
+    }
+    if (typeof body.client_id === "string") {
+      updates.push("client_id = ?" + (values.length + 1));
+      values.push(body.client_id.trim());
+    }
+    if (typeof body.scope === "string") {
+      updates.push("scope = ?" + (values.length + 1));
+      values.push(body.scope.trim());
+    }
+    if (typeof body.custom_authorize_url === "string") {
+      updates.push("custom_authorize_url = ?" + (values.length + 1));
+      values.push(body.custom_authorize_url.trim());
+    }
+    if (typeof body.custom_token_url === "string") {
+      updates.push("custom_token_url = ?" + (values.length + 1));
+      values.push(body.custom_token_url.trim());
+    }
+    if (typeof body.custom_userinfo_url === "string") {
+      updates.push("custom_userinfo_url = ?" + (values.length + 1));
+      values.push(body.custom_userinfo_url.trim());
+    }
+    if (typeof body.custom_token_field === "string" && body.custom_token_field.trim()) {
+      updates.push("custom_token_field = ?" + (values.length + 1));
+      values.push(body.custom_token_field.trim());
+    }
+    if (typeof body.enabled === "boolean") {
+      updates.push("enabled = ?" + (values.length + 1));
+      values.push(body.enabled ? 1 : 0);
+    }
+    // Client secret：三种处理模式
+    if (typeof body.client_secret === "string") {
+      if (body.client_secret === "") {
+        // 显式清除
+        updates.push("client_secret_cipher = NULL");
+      } else if (body.client_secret.trim() !== "__keep__") {
+        // 更新为新密码
+        const cipher = await encryptSecret(body.client_secret.trim(), env.admin);
+        if (!cipher) return json({ error: "secret_encrypt_failed" }, 500);
+        updates.push("client_secret_cipher = ?" + (values.length + 1));
+        values.push(cipher);
+      }
+      // 其他情况（undefined 或 __keep__）：保留原值不动
+    }
+
+    values.push(id);
+    const sql = `UPDATE oauth_providers SET ${updates.join(", ")} WHERE id = ?${values.length}`;
+    await env.db.prepare(sql).bind(...values).run();
+    return json({ ok: true });
+  }
+
+  // DELETE /api/admin/oauth/providers/:id
+  if (m && !m[3] && method === "DELETE") {
+    const id = m[1];
+    await env.db.prepare("DELETE FROM oauth_providers WHERE id = ?1").bind(id).run();
+    return json({ ok: true });
+  }
+
+  // POST /api/admin/oauth/providers/:id/toggle —— 切换启用/禁用
+  if (m && m[3] === "toggle" && method === "POST") {
+    const id = m[1];
+    await env.db
+      .prepare("UPDATE oauth_providers SET enabled = 1 - enabled, updated_at = ?1 WHERE id = ?2")
+      .bind(Date.now(), id)
+      .run();
     return json({ ok: true });
   }
 
