@@ -2,6 +2,8 @@ export interface Env {
   r2: R2Bucket;
   db: D1Database;
   admin: string;
+  /** 可选：2FA 恢复密钥（Cloudflare 后台配置）。优先级高于 D1 里的恢复码。 */
+  totp_recovery?: string;
 }
 
 export interface ShareRow {

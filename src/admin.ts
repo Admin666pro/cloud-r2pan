@@ -5,7 +5,7 @@ import { checkAdminKey, createSession, verifySession, clientIp, rateLimitLogin }
 import { pickLang } from "./i18n";
 import { hashPassword } from "./public";
 import { parseUA } from "./ua";
-import { encryptSecret, decryptSecret } from "./crypto";
+import { encryptSecret, decryptSecret, totpGenerateSecret, totpVerify, totpUri, totpGenerateRecoveryCodes, sha256Hex, safeEqual } from "./crypto";
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -77,22 +77,95 @@ export async function handleAdminApi(
   const method = req.method;
   const url = new URL(req.url);
 
-  // ── 登录（无需会话） ──────────────────────────────
+  // ── 登录（支持 2FA 两阶段） ──────────────────────────────
   if (path === "/api/admin/login" && method === "POST") {
     const ip = clientIp(req);
     if (!rateLimitLogin(ip)) {
-      // 限流也记一笔
       ctx.waitUntil(writeLoginLog(env, req, "login", "fail", "rate_limited"));
       return json({ error: msg(req, "尝试过于频繁，请稍后再试", "Too many attempts. Please try again later.") }, 429);
     }
     if (!env.admin)
       return json({ error: msg(req, "未设置 admin 密钥，请先执行 npx wrangler secret put admin", "admin is not set. Run: npx wrangler secret put admin") }, 500);
-    const body = await readJson<{ key: string }>(req);
+    const body = await readJson<{ key: string; code?: string }>(req);
     if (!body.key || !checkAdminKey(env, body.key)) {
       ctx.waitUntil(writeLoginLog(env, req, "login", "fail", "invalid_key"));
       return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
     }
-    ctx.waitUntil(writeLoginLog(env, req, "login", "success"));
+
+    // 密码正确 —— 检查是否需要 2FA
+    const s = await getSettings(env);
+    const needsTotp = s.totpEnabled && s.totpSecretCipher;
+
+    if (needsTotp) {
+      // 没带 code → 要求 2FA
+      if (!body.code) {
+        return json({ need_2fa: true });
+      }
+
+      // 先尝试 TOTP
+      const totpSecret = await decryptSecret(s.totpSecretCipher!, env.admin);
+      const totpOk = totpSecret ? await totpVerify(totpSecret, body.code) : false;
+
+      if (totpOk) {
+        ctx.waitUntil(writeLoginLog(env, req, "login", "success", "2fa_totp"));
+      } else {
+        // 尝试恢复码（两种来源：Cloudflare Secret 优先 → D1 恢复码）
+        const normalized = body.code.replace(/\s+/g, "").toUpperCase();
+
+        // 1) Cloudflare Secret 恢复码（超级恢复，用一次不消耗）
+        const cloudflareRecovery = env.totp_recovery?.trim();
+        if (cloudflareRecovery && safeEqual(normalized, cloudflareRecovery.replace(/\s+/g, "").toUpperCase())) {
+          // 用了云变量恢复码 —— 自动重置 2FA（因为 secret 可能丢了）
+          await updateSettings(env, {
+            totp_enabled: "0",
+            totp_secret_cipher: "",
+            totp_recovery_hash: "",
+          });
+          ctx.waitUntil(writeLoginLog(env, req, "login", "success", "recovery_cloudflare"));
+          return new Response(JSON.stringify({ ok: true, recovery_used: true, totp_reset: true }), {
+            headers: {
+              "content-type": "application/json;charset=utf-8",
+              "set-cookie": await createSession(env, url.protocol === "https:"),
+              "cache-control": "no-store",
+            },
+          });
+        }
+
+        // 2) D1 存储的恢复码列表（消耗型，用一次删一次）
+        if (s.totpRecoveryHash) {
+          const hashes = s.totpRecoveryHash.split(",").filter(Boolean);
+          const inputHash = await sha256Hex(normalized);
+          let matched = -1;
+          for (let i = 0; i < hashes.length; i++) {
+            if (safeEqual(inputHash, hashes[i])) { matched = i; break; }
+          }
+          if (matched >= 0) {
+            // 从列表中移除已使用的恢复码
+            hashes.splice(matched, 1);
+            await updateSettings(env, { totp_recovery_hash: hashes.join(",") });
+            // 恢复码通过 → 自动重置 2FA
+            await updateSettings(env, {
+              totp_enabled: "0",
+              totp_secret_cipher: "",
+            });
+            ctx.waitUntil(writeLoginLog(env, req, "login", "success", "recovery_code"));
+            return new Response(JSON.stringify({ ok: true, recovery_used: true, totp_reset: true }), {
+              headers: {
+                "content-type": "application/json;charset=utf-8",
+                "set-cookie": await createSession(env, url.protocol === "https:"),
+                "cache-control": "no-store",
+              },
+            });
+          }
+        }
+
+        // 都不对
+        ctx.waitUntil(writeLoginLog(env, req, "login", "fail", "invalid_2fa"));
+        return json({ error: msg(req, "2FA 验证失败", "Invalid 2FA code") }, 401);
+      }
+    }
+
+    ctx.waitUntil(writeLoginLog(env, req, "login", "success", needsTotp ? "2fa" : null));
     return new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json;charset=utf-8",
@@ -120,7 +193,14 @@ export async function handleAdminApi(
 
   // 会话检查
   if (path === "/api/admin/session" && method === "GET") {
-    return json({ ok: true, site_title: (await getSettings(env)).siteTitle });
+    const s = await getSettings(env);
+    return json({
+      ok: true,
+      site_title: s.siteTitle,
+      totp_enabled: s.totpEnabled,
+      cloudflare_recovery: !!env.totp_recovery,
+      recovery_remaining: s.totpRecoveryHash ? s.totpRecoveryHash.split(",").filter(Boolean).length : 0,
+    });
   }
 
   // ── 概览统计 ──────────────────────────────────────
@@ -503,6 +583,96 @@ export async function handleAdminApi(
     }
     const r = await env.db.prepare(sql).bind(...binds).run();
     return json({ ok: true, deleted: r.meta.changes ?? 0 });
+  }
+
+  // ── 2FA 状态查询 ───────────────────────────────────
+  if (path === "/api/admin/2fa/status" && method === "GET") {
+    const s = await getSettings(env);
+    return json({
+      enabled: s.totpEnabled && !!s.totpSecretCipher,
+      cloudflare_recovery: !!env.totp_recovery,
+      recovery_remaining: s.totpRecoveryHash ? s.totpRecoveryHash.split(",").filter(Boolean).length : 0,
+    });
+  }
+
+  // ── 2FA Setup：生成新 secret（未启用，需要 verify+enable 才生效） ──
+  if (path === "/api/admin/2fa/setup" && method === "POST") {
+    const body = await readJson<{ admin_key: string }>(req);
+    if (!body.admin_key || !checkAdminKey(env, body.admin_key)) {
+      return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
+    }
+    // 如果已经启用，需要先 disable 再 setup（或者覆盖）
+    const secret = totpGenerateSecret();
+    const s = await getSettings(env);
+    const siteTitle = s.siteTitle || "cloud-r2pan";
+    const uri = totpUri(secret, siteTitle, "admin");
+    return json({
+      secret, // 仅本次返回，前端展示二维码用
+      uri,
+    });
+  }
+
+  // ── 2FA Enable：验证通过后写入 settings（加密存储）并生成恢复码 ──
+  if (path === "/api/admin/2fa/enable" && method === "POST") {
+    const body = await readJson<{ admin_key: string; code: string; secret: string }>(req);
+    if (!body.admin_key || !checkAdminKey(env, body.admin_key)) {
+      return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
+    }
+    if (!/^[A-Z2-7]{16,}$/.test((body.secret || "").toUpperCase())) {
+      return json({ error: msg(req, "Secret 格式无效", "Invalid secret format") }, 400);
+    }
+    const code = (body.code || "").trim();
+    if (!/^\d{6}$/.test(code)) {
+      return json({ error: msg(req, "请输入 6 位验证码", "Please enter 6-digit code") }, 400);
+    }
+    const secret = body.secret!.toUpperCase();
+    const ok = await totpVerify(secret, code);
+    if (!ok) {
+      return json({ error: msg(req, "验证码错误", "Invalid verification code") }, 401);
+    }
+    // 验证通过 → 加密存 secret + 生成恢复码
+    const cipher = await encryptSecret(secret, env.admin);
+    const recoveryCodes = totpGenerateRecoveryCodes(8);
+    const recoveryHash = (await Promise.all(recoveryCodes.map((c) => sha256Hex(c.replace(/\s+/g, ""))))).join(",");
+    await updateSettings(env, {
+      totp_enabled: "1",
+      totp_secret_cipher: cipher,
+      totp_recovery_hash: recoveryHash,
+    });
+    return json({
+      ok: true,
+      recovery_codes: recoveryCodes, // 只这一次明文返回，前端提示用户保存
+    });
+  }
+
+  // ── 2FA Disable：关闭 2FA（需验证 admin key） ──
+  if (path === "/api/admin/2fa/disable" && method === "POST") {
+    const body = await readJson<{ admin_key: string }>(req);
+    if (!body.admin_key || !checkAdminKey(env, body.admin_key)) {
+      return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
+    }
+    await updateSettings(env, {
+      totp_enabled: "0",
+      totp_secret_cipher: "",
+      totp_recovery_hash: "",
+    });
+    return json({ ok: true });
+  }
+
+  // ── 重新生成恢复码（覆盖旧的，旧的全部失效） ──
+  if (path === "/api/admin/2fa/regen-recovery" && method === "POST") {
+    const body = await readJson<{ admin_key: string }>(req);
+    if (!body.admin_key || !checkAdminKey(env, body.admin_key)) {
+      return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
+    }
+    const s = await getSettings(env);
+    if (!s.totpEnabled || !s.totpSecretCipher) {
+      return json({ error: msg(req, "2FA 未启用", "2FA is not enabled") }, 400);
+    }
+    const recoveryCodes = totpGenerateRecoveryCodes(8);
+    const recoveryHash = (await Promise.all(recoveryCodes.map((c) => sha256Hex(c.replace(/\s+/g, ""))))).join(",");
+    await updateSettings(env, { totp_recovery_hash: recoveryHash });
+    return json({ ok: true, recovery_codes: recoveryCodes });
   }
 
   // ── 读取设置 ──────────────────────────────────────

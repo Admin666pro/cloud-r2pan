@@ -17,6 +17,12 @@ export interface Settings {
   autoBan: boolean;
   /** 自动封禁时长（小时），0 = 永久 */
   banHours: number;
+  /** 2FA 是否已启用 */
+  totpEnabled: boolean;
+  /** TOTP secret（D1 中存的是用 admin 加密后的密文） */
+  totpSecretCipher: string | null;
+  /** 恢复码列表（D1 中存的是 hash 后的值，用逗号分隔） */
+  totpRecoveryHash: string | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -28,6 +34,9 @@ export const DEFAULT_SETTINGS: Settings = {
   countWindowHours: 24,
   autoBan: true,
   banHours: 24,
+  totpEnabled: false,
+  totpSecretCipher: null,
+  totpRecoveryHash: null,
 };
 
 function toInt(v: unknown, fallback: number): number {
@@ -64,6 +73,9 @@ export async function getSettings(env: Env): Promise<Settings> {
     countWindowHours: toInt(map.get("count_window_hours"), DEFAULT_SETTINGS.countWindowHours),
     autoBan: (map.get("auto_ban") ?? "1") === "1",
     banHours: toInt(map.get("ban_hours"), DEFAULT_SETTINGS.banHours),
+    totpEnabled: map.get("totp_enabled") === "1",
+    totpSecretCipher: map.get("totp_secret_cipher") ?? null,
+    totpRecoveryHash: map.get("totp_recovery_hash") ?? null,
   };
 }
 

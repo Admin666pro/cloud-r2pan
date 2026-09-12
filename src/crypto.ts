@@ -116,3 +116,118 @@ export async function decryptSecret(payload: string, secret: string): Promise<st
     return null;
   }
 }
+
+/* ═══════════════════════════════════════════════
+ * TOTP (RFC 6238) — Google Authenticator 标准
+ * 依赖: crypto.subtle (HMAC-SHA1)
+ * ═══════════════════════════════════════════════ */
+
+const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+/** 随机生成 TOTP secret（20 字节 → 32 字符 Base32） */
+export function totpGenerateSecret(len = 20): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(len));
+  let out = "";
+  // 每 5 bit 取一个 alphabet 字符
+  let buf = 0;
+  let bits = 0;
+  for (const b of bytes) {
+    buf = (buf << 8) | b;
+    bits += 8;
+    while (bits >= 5) {
+      bits -= 5;
+      out += BASE32_ALPHABET[(buf >> bits) & 0x1f];
+    }
+  }
+  if (bits > 0) out += BASE32_ALPHABET[(buf << (5 - bits)) & 0x1f];
+  return out;
+}
+
+/** Base32 解码 → Uint8Array */
+function base32Decode(s: string): Uint8Array {
+  s = s.toUpperCase().replace(/[^A-Z2-7]/g, "");
+  let buf = 0;
+  let bits = 0;
+  const out: number[] = [];
+  for (const ch of s) {
+    const v = BASE32_ALPHABET.indexOf(ch);
+    if (v < 0) throw new Error("invalid base32");
+    buf = (buf << 5) | v;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((buf >> bits) & 0xff);
+    }
+  }
+  return new Uint8Array(out);
+}
+
+/** HMAC-SHA1 (不是 SHA256) — TOTP 标准要求 */
+async function hmacSha1(key: Uint8Array, msg: Uint8Array): Promise<Uint8Array> {
+  const k = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", k, msg);
+  return new Uint8Array(sig);
+}
+
+/** 生成指定时间步的 6 位 TOTP */
+async function totpAt(secretB32: string, counter: number, digits = 6): Promise<string> {
+  const key = base32Decode(secretB32);
+  // counter 大端序 8 字节
+  const c = new Uint8Array(8);
+  let v = counter;
+  for (let i = 7; i >= 0; i--) {
+    c[i] = v & 0xff;
+    v = Math.floor(v / 256);
+  }
+  const sig = await hmacSha1(key, c);
+  const offset = sig[sig.length - 1] & 0x0f;
+  const code =
+    ((sig[offset] & 0x7f) << 24 |
+      (sig[offset + 1] & 0xff) << 16 |
+      (sig[offset + 2] & 0xff) << 8 |
+      (sig[offset + 3] & 0xff)) %
+    10 ** digits;
+  return String(code).padStart(digits, "0");
+}
+
+/** 验证 TOTP 码（容忍 ±1 个时间步，共 90 秒窗口） */
+export async function totpVerify(secretB32: string, code: string, step = 30): Promise<boolean> {
+  if (!/^\d{6}$/.test(code)) return false;
+  const counter = Math.floor(Date.now() / 1000 / step);
+  for (const offset of [-1, 0, 1]) {
+    try {
+      const expected = await totpAt(secretB32, counter + offset);
+      if (safeEqual(code, expected)) return true;
+    } catch {
+      /* base32 非法 */
+    }
+  }
+  return false;
+}
+
+/** 生成 TOTP URI（用于前端扫码） */
+export function totpUri(secretB32: string, issuer: string, account: string): string {
+  const params = new URLSearchParams({
+    secret: secretB32,
+    issuer,
+    algorithm: "SHA1",
+    digits: "6",
+    period: "30",
+  });
+  // URL 编码 account（@ 等特殊字符）
+  return `otpauth://totp/${encodeURIComponent(issuer + ": " + account)}?${params.toString()}`;
+}
+
+/** 生成一组随机恢复码（8 位数字字符，用空格分组显示） */
+export function totpGenerateRecoveryCodes(n = 8): string[] {
+  const codes: string[] = [];
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  for (let i = 0; i < n; i++) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    let c = "";
+    for (let j = 0; j < 16; j++) c += alphabet[bytes[j] % alphabet.length];
+    // 8 字符一组 2 段
+    codes.push(c.slice(0, 8) + " " + c.slice(8, 16));
+  }
+  return codes;
+}
