@@ -4,25 +4,12 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-01",
 
-  "d1_databases": [
-    {
-      "binding": "db",
-      "database_name": "cloud-r2pan",
-      "database_id": "${CLOUDFLARE_D1_ID}"
-    }
-  ],
-
-  "r2_buckets": [
-    {
-      "binding": "r2",
-      "bucket_name": "cloud-r2pan"
-    }
-  ],
-
-  "vars": {
-    // 非敏感、可公开的配置
-    // 敏感值（admin / turnstile / totp 恢复码）用 Secret 面板配，或在 .dev.vars / .env 里
-  },
+  // R2 与 D1 的绑定改由 Cloudflare 控制台手动配置（Worker → Settings → Bindings），
+  // 这里不再声明，因此部署时不需要 database_id，真实 ID 永不进仓库，也无需环境变量注入。
+  // 对应绑定名（勿改）：
+  //   r2    → R2 Bucket（cloud-r2pan）
+  //   db    → D1 Database（cloud-r2pan）
+  //   admin → Secret（管理后台密钥）
 
   // 将 public/*.html 作为文本模块导入
   "rules": [
