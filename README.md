@@ -1,320 +1,196 @@
-# cloud-r2pan
+# cloud-r2pan 架构说明
 
-iOS 26 液态玻璃风格网盘分享系统，基于 **Cloudflare Workers + R2 + D1** 构建。
-支持文件上传、分享链接（有效期/次数/访问密码）、流量限额、单 IP 限流与自动封禁、下载日志、中英双语。
+一个 iOS 26 液态玻璃风格的网盘分享系统，基于 **Cloudflare Workers + R2 + D1** 构建。支持文件上传、分享链接（有效期 / 次数 / 访问密码）、流量限额、单 IP 限流与自动封禁、下载日志、登录审计、2FA 两步验证、Turnstile 人机验证，以及中英双语。
 
-***
+---
 
-## 一、项目结构
+## 技术选型
+
+| 层 | 技术 | 理由 |
+|---|---|---|
+| 计算 | **Cloudflare Workers** | 边缘计算，毫秒级冷启动，自带全球 CDN，零服务器运维 |
+| 对象存储 | **Cloudflare R2** | 与 Worker 同生态，API 兼容 S3，无出站流量费 |
+| 数据库 | **Cloudflare D1** | Serverless SQLite，支持 SQL 原子更新（用于下载计数扣减），自带索引优化 |
+| 前端 | **原生 HTML + CSS + JavaScript** | 单文件无构建，`fetch` + `FormData` + 动态模板，零运行时开销 |
+| 加密 | **Web Crypto API** | Worker 运行时原生支持（SHA-256、HMAC-SHA256、AES-GCM、HKDF），无第三方依赖 |
+| 人机验证 | **Cloudflare Turnstile** | 与 Workers 同生态，零配置，前端 widget + 后端 siteverify 双重校验 |
+| 2FA | **TOTP (RFC 6238)** | Google Authenticator 标准，Worker 原生 `crypto.subtle` 实现 HMAC-SHA1 |
+
+---
+
+## 目录结构
 
 ```
 .
-├── src/
-│   ├── index.ts        # 入口与路由
-│   ├── admin.ts        # 管理后台 API
-│   ├── public.ts       # 公开分享/下载/密码校验
-│   ├── pages.ts        # 页面渲染（后台页、分享页、错误页）
-│   ├── db.ts           # D1 建表与迁移
-│   ├── settings.ts     # 站点配置与流量统计
-│   ├── auth.ts         # 登录会话 / IP 识别
-│   ├── ua.ts           # 浏览器与系统解析
-│   └── i18n.ts         # 后端语言检测（Accept-Language + 时区）
-├── public/
-│   ├── admin.html      # 管理后台（前端）
-│   └── share.html      # 分享页（前端）
-├── wrangler.jsonc      # Worker 配置与绑定
-├── .dev.vars           # 本地开发环境变量（勿提交！）
+├── src/                        # Worker 源码（TypeScript）
+│   ├── index.ts               # 入口 & 路由分发
+│   ├── admin.ts               # 管理后台全部 REST API
+│   ├── public.ts              # 公开分享页、下载、密码校验、Turnstile
+│   ├── pages.ts               # HTML 页面 & 错误页渲染
+│   ├── db.ts                  # D1 建表 + 幂等迁移
+│   ├── settings.ts            # 站点配置读写 + 流量统计
+│   ├── auth.ts                # Session 签发校验、IP 识别、登录限流
+│   ├── crypto.ts              # 密码哈希、HMAC、AES-GCM、TOTP、恢复码
+│   ├── ua.ts                  # User-Agent → 浏览器 / 系统
+│   └── i18n.ts                # Accept-Language + 时区 → 中文 / 英文
+├── public/                     # 前端页面（被 Worker 以静态资源形式内嵌）
+│   ├── admin.html             # 管理后台 SPA（登录 + 六个 Tab）
+│   └── share.html             # 分享页（下载 + 密码 + Turnstile）
 └── package.json
 ```
 
-***
+**零运行时依赖**：除了 `typescript`、`wrangler`、`@cloudflare/workers-types` 三个开发依赖，生产代码不引入任何 npm 包。全部使用 Worker 原生 API。
 
-## 二、绑定名称（Binding 一览）
+---
 
-这些名称在代码中直接使用，改绑定名需同步改代码，请保持一致。
+## 路由架构
 
-| 绑定名称        | 类型           | 资源名称            | 作用                |
-| ----------- | ------------ | --------------- | ----------------- |
-| `BUCKET`    | R2 Bucket    | `crystal-drive` | 存储上传的文件对象         |
-| `DB`        | D1 Database  | `crystal-drive` | 元数据、分享、日志、配置、流量统计 |
-| `ADMIN_KEY` | Secret（环境变量） | —               | 管理后台登录密钥          |
-
-> Worker 名称：`crystal-drive`；入口：`src/index.ts`。
-
-***
-
-## 三、首次部署准备（一次性）
-
-### 0. 前置条件
-
-- 一个 [Cloudflare](https://dash.cloudflare.com) 账户
-
-- 本地安装 [Node.js](https://nodejs.org)（≥ 18，推荐 20/22）与 npm
-
-- 本项目依赖：`npm install`（只需 `wrangler` + `@cloudflare/workers-types` + `typescript`）
-
-### 1. 登录 Cloudflare（会打开浏览器授权）
-
-```bash
-npx wrangler login
-```
-
-### 2. 创建 R2 存储桶
-
-```bash
-npx wrangler r2 bucket create crystal-drive
-```
-
-### 3. 创建 D1 数据库，并记录返回的 `database_id`
-
-```bash
-npx wrangler d1 create crystal-drive
-```
-
-输出中会出现类似：
+所有请求先进入 `index.ts` 做一次路由分发，路由规则简单清晰：
 
 ```
-database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+GET  /admin                → 管理后台 HTML
+ANY  /api/admin/*          → admin.ts 统一处理（鉴权后分发到各子接口）
+GET  /s/:token             → 分享页 HTML
+GET  /s/:token/info        → 分享元信息 JSON（文件大小、状态、Turnstile 状态）
+POST /s/:token/verify      → 密码校验 + Turnstile 校验 → 颁发下载令牌
+GET  /s/:token/download    → 下载主流程（封禁 → 密码 → Turnstile → R2 Range）
+其他                        → 404
 ```
 
-### 4. 把 `database_id` 填进 `wrangler.jsonc`
+管理后台 API 内部再按路径分发到十几个子接口（登录、文件增删、分享增删查改、封禁、日志、2FA、Turnstile、设置）。
 
-打开 [wrangler.jsonc](wrangler.jsonc)，把 `d1_databases[].database_id` 从占位符 `LOCAL_PLACEHOLDER` 改成上一步真实值：
+---
 
-```jsonc
-"d1_databases": [
-  { "binding": "DB", "database_name": "crystal-drive", "database_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" }
-]
+## 数据库 Schema（D1）
+
+共 **7 张表**，首次请求时由 `ensureSchema` 自动创建，旧库有幂等 `ALTER TABLE` 迁移：
+
+| 表 | 主键 | 核心字段 | 用途 |
+|---|---|---|---|
+| `files` | `id` | `key`, `name`, `size`, `mime` | R2 对象的元数据索引 |
+| `shares` | `id` | `file_id`, `expires_at`, `max_downloads`, `download_count`, `revoked`, `password_hash`, `password_cipher` | 分享链接。`password_cipher` 存可逆加密后的密码明文（AES-GCM），用于管理员事后查看 |
+| `download_logs` | `id` | `share_id`, `file_id`, `ip`, `browser`, `os`, `country`, `bytes`, `created_at` | 每次下载一行，用于"单 IP 重复下载检测"和流量统计 |
+| `login_logs` | `id` | `action`, `ip`, `browser`, `os`, `country`, `result`, `reason`, `created_at` | 管理员登录审计（成功 / 失败 / 限流 / 登出 / 恢复码） |
+| `turnstile_visits` | `(ip, day)` | `count` | 每 IP 每天访问次数，复合主键按天自动归零，超过阈值触发 Turnstile |
+| `banned_ips` | `ip` | `reason`, `banned_at`, `expires_at` | 自动封禁 + 到期自动解封 |
+| `settings` | `key` | `value` | 全站 KV 配置（流量限额、Turnstile、2FA 等） |
+| `traffic_stats` | `day` | `bytes`, `downloads` | 每日流量/下载汇总 |
+
+**关键索引**：`idx_shares_file`、`idx_logs_share_ip`、`idx_logs_created`、`idx_login_logs_ip`、`idx_turnstile_day` —— 支撑高频查询在 D1 毫秒级响应。
+
+---
+
+## 安全实现亮点
+
+### 管理登录（Session Cookie + 可选 2FA）
+
+```
+POST /api/admin/login { key }
+  ├─ 密码错误 → 写 login_logs → 401
+  ├─ 限流（同 IP 10 次 / 分钟）→ 写 login_logs → 429
+  ├─ 密码正确 + 2FA 未开 → 签发 cookie → 200
+  └─ 密码正确 + 2FA 已开
+      ├─ 无 code → 返回 { need_2fa: true }
+      └─ 带 code
+          ├─ TOTP 6 位码 ✓ → 签发 cookie → 200
+          └─ TOTP ✗ → 尝试恢复码：
+              ├─ Cloudflare Secret totp_recovery → 通过（不消耗）→ 重置 2FA → 200
+              └─ D1 存储的恢复码列表（SHA-256 hash）→ 通过（消耗一个）→ 重置 2FA → 200
 ```
 
-> 数据库的建表（`files` / `shares` / `download_logs` / `banned_ips` / `settings` / `traffic_stats`）会在首次请求时由 `ensureSchema` 自动创建，无需手动导入 SQL。
+- **Session**：`cd_admin` cookie，`HttpOnly + SameSite=Strict`，签名用 HMAC-SHA256
+- **TOTP**：Worker 原生 `crypto.subtle` 实现 HMAC-SHA1（±90 秒窗口，共 3 个时间步）
+- **恢复码**：两种来源——Cloudflare Secret（万能恢复，不消耗）和 D1 存储的 8 个消耗型码（只存 hash）
+- **2FA 关闭时需二次输入 admin key**，防止被一键关掉
 
-### 5. 设置管理后台密钥 `ADMIN_KEY`
+### 分享密码（双重存储）
 
-```bash
-# 交互式输入（输入的内容不会被回显）
-npx wrangler secret put ADMIN_KEY
+- `password_hash`：加盐 SHA-256，只用于**验证**（不可逆）
+- `password_cipher`：AES-GCM + HKDF 从 admin 密钥派生密钥，用于**事后查看**
+- 分享列表 API 返回 `password_plain`（解密后的明文），前端提供 👁 显示/隐藏 + 📋 一键复制
+
+### 下载授权（HMAC 令牌）
+
+没有密码的分享直接 R2 流式输出；有密码的分享在 `POST /verify` 后颁发一个 `t=expiry.HMAC(admin, "token:expiry")` 的短时令牌（24h），下载时校验签名和过期时间。令牌本身不带密码，防重放能力通过签名 + 过期双重保障。
+
+### Turnstile 人机验证（规则化触发）
+
+- **4 种触发模式**：`off` / `on_share`（打开分享页时）/ `on_download`（点下载时）/ `both`（双重保险）
+- **阈值规则**：每 IP 每天访问分享页超过 N 次后开始弹，默认 5 次，`turnstile_visits` 复合主键 `(ip, day)` 天然按天归零
+- **双重校验**：前端 widget 渲染 + 后端 `siteverify` API 校验 token，缺其一直接 403
+- **凭证三层兜底**：`turnstile_secret`（Cloudflare Secret，必须）→ `turnstile_sitekey`（Cloudflare Secret，可选）→ `sitekey_override`（D1 settings 里填）
+
+### 下载流程（层层拦截）
+
+```
+handleDownload 执行顺序：
+  1. banned_ips 表检查 → 过期自动解封
+  2. 分享有效性 → 状态机（revoked / expired / maxed）
+  3. 原子扣减 download_count（SQL UPDATE ... WHERE download_count < max_downloads）
+  4. 密码校验（需要 HMAC 令牌）
+  5. Turnstile 校验（on_download / both 模式）
+  6. 流量限额（达上限暂停全部下载）
+  7. 单 IP 重复下载检查 + 自动封禁
+  8. R2 流式读取（支持 Range 断点续传）
+  9. waitUntil 异步：写 download_logs + addTraffic
 ```
 
-> `ADMIN_KEY` 是登录管理后台的唯一密钥，请务必设置，并妥善保管。
+第 3 步是防并发超卖的关键：原实现用旧值拦截后才 +1，并发 20 个请求全过。修复后用 SQL 条件原子完成——`UPDATE ... WHERE download_count < max`，`changes=0` 即达上限。
 
-***
+---
 
-## 四、部署指令（手动部署）
+## 前端架构
 
-### 本地开发预览
+两个 HTML 页面，各自内嵌完整的 JavaScript SPA，零构建、零框架依赖：
 
-启动本地开发服务器（本地会用 `.dev.vars` 里的 `ADMIN_KEY`，D1/R2 为本地模拟）：
+### admin.html（管理后台）
 
-```bash
-npm run dev
-# 或 npx wrangler dev
-```
+单文件 2000+ 行，iOS 26 液态玻璃设计（毛玻璃 + 渐变球形背景 + 上升动画）。六个 Tab：
 
-默认地址：`http://localhost:8787`（首页会自动跳转到 `/admin` 管理后台）。
+| Tab | 功能 |
+|---|---|
+| 概览 | 流量图表（每日 / 每周）、下载 / 分享 / 文件计数、最近活动 |
+| 文件 | 上传（FormData 直传 Worker → R2）、删除（级联删 shares） |
+| 分享 | 列表（文件大小、有效期、密码明文显示、下载状态徽章）、创建、撤销 |
+| 日志 | 下载记录（IP / 浏览器 / OS / 国家 / 流量）、分页、搜索 |
+| 封禁 | 封禁列表 + 解封 |
+| 安全 | 登录审计日志（成功 / 失败 / 登出 / 2FA）、24h 失败告警、分页搜索 |
+| 设置 | 站点标题、流量限额、单 IP 限流、2FA 开关、Turnstile 模式 / 阈值 / SiteKey |
 
-### 正式部署到 Cloudflare
+### share.html（公开分享页）
 
-```bash
-npm run deploy
-# 或 npx wrangler deploy
-```
+访客看到的下载页。逻辑分支：
 
-等价于 `npx wrangler deploy`，会使用 [wrangler.jsonc](wrangler.jsonc) 的配置打包部署 worker `crystal-drive`。
+- 链接已撤销 / 过期 / 下载满 → 错误页
+- 有密码 → 密码输入框 + 提交后颁发下载令牌
+- Turnstile on_share 模式 + 超过阈值 → 页面加载即渲染 widget
+- Turnstile on_download 模式 → 点下载按钮时才渲染 widget
+- Turnstile both 模式 → 分享页弹一次 + verify 阶段再校验一次
 
-### 查看线上日志
+底部有 GitHub Octocat 悬浮按钮（跳转到 `Admin666pro/cloud-oauth2`），iOS safe-area 适配。
 
-```bash
-npm run tail
-# 或 npx wrangler tail
-```
+---
 
-### 首次访问
+## 流量统计
 
-部署成功后：
+三个来源互相配合：
 
-- 管理后台：`https://crystal-drive.<你的账号>.workers.dev/admin`
+- **实时扣减**：每次下载后 `ctx.waitUntil(addTraffic(bytes))` 更新 `settings.traffic_used_bytes`（原子 + 月度重置）
+- **每日汇总**：`traffic_stats(day)` 表记录每天的 `bytes` 和 `downloads`，概览页图表用
+- **下载日志**：`download_logs` 保留完整明细，用于 IP 重复下载检测
 
-- 用 `ADMIN_KEY` 登录
+月度自动重置逻辑：读 settings 时发现当前月份 ≠ 存储的 `trafficMonth`，立即重置 `trafficUsedBytes = 0` 并更新月份。
 
-- 分享页格式：`https://crystal-drive.<你的账号>.workers.dev/s/<token>`
+---
 
-***
+## 关键设计决策总结
 
-## 五、图形化 Web 部署（Cloudflare 控制台）
-
-这套流程全部在**浏览器里的 Cloudflare 控制台（Dashboard）完成，适合不熟悉命令行、或想用网页界面管理资源的人。它和上面的命令行部署是**等价、二选一的关系。
-
-> ⚠️ 提醒：本项目源码是 **TypeScript + 多个** **`.html`** **文本模块**（`wrangler.jsonc` 里配了 `rules`），Cloudflare 网页编辑器无法直接打包这类工程。因此\*\*「建 Worker + 建资源 + 配绑定 + 配密钥」用网页完成\*\*，最后把代码推上去仍需一次 `npm run deploy`（详见步骤 5.6）。这一步只依赖你电脑上已有的 npm，资源管理平时都在网页端看。
-
-### 5.0 准备
-
-- 一个已登录的 [Cloudflare 控制台](https://dash.cloudflare.com)
-
-### 5.1 创建 R2 存储桶
-
-1. 左侧菜单 → **R2** → **Create bucket**
-2. 名称填 `crystal-drive` → 选区域 → **Create bucket**
-
-### 5.2 创建 D1 数据库
-
-1. 左侧菜单 → **D1** → **Create database**
-2. 名称填 `crystal-drive` → **Create**
-3. **复制页面上的** **`database_id`**（形如 UUID），下面绑定要用
-
-### 5.3 创建 Worker
-
-1. 左侧菜单 → **Workers & Pages** → **Create** → **Worker**
-2. 名称填 `crystal-drive` → **Deploy** → 进入该 Worker 页面
-
-### 5.4 添加绑定（Bindings）
-
-1. 在该 Worker 里 → **Settings** → **Bindings** → **Add binding**
-2. 添加 **R2 Bucket**：
-
-   - **Variable name** 填 `BUCKET`（绑定名固定，勿改）
-
-   - R2 bucket 选 `crystal-drive`
-3. 添加 **D1 Database**：
-
-   - **Variable name** 填 `DB`（绑定名固定，勿改）
-
-   - 选 `crystal-drive`（或直接粘贴第 5.2 步的 `database_id`）
-
-### 5.5 设置管理密钥 ADMIN\_KEY
-
-1. 同一个 Worker → **Settings** → **Variables and Secrets** → **Add** → **Secret**
-2. Variable name 填 `ADMIN_KEY`，值填你的管理密码 → **Deploy**
-
-### 5.6 上传代码（网页版最后一步）
-
-本地一次命令完成代码部署（网页端负责资源/绑定/密钥）：
-
-```bash
-cd 项目目录
-npm install
-npm run deploy
-```
-
-### 5.7 访问
-
-- 管理后台：`https://crystal-drive.<你的账号>.workers.dev/admin`（用 `ADMIN_KEY` 登录）
-
-- 分享页格式：`https://crystal-drive.<你的账号>.workers.dev/s/<token>`
-
-> 日常用网页端查看：**Workers → crystal-drive → Console / Logs / Metrics**（日志、监控）、**Settings → Variables/Bindings**（改密钥/绑定）。
-
-***
-
-## 六、工作流部署（CI/CD · GitHub Actions）
-
-项目目前**尚未**包含工作流文件。以下为推荐配置，可按需创建
-`.github/workflows/deploy.yml`。
-
-工作机制：
-
-1. 推送到 `main` 分支（或手动触发 `workflow_dispatch`）时自动部署
-2. CI 内用 `cloudflare/wrangler-action@v3` 调用 `wrangler deploy`
-3. D1 迁移（占位符注入）由 `sed` 在 CI 中完成
-
-### 5.1 需要在 GitHub 配置的 Secret / Variable
-
-| 名称               | 类型     | 说明                                                                        |
-| ---------------- | ------ | ------------------------------------------------------------------------- |
-| `CF_API_TOKEN`   | Secret | Cloudflare API 令牌，需有 `Workers Scripts: Edit`、`Workers R2`、`Workers D1` 权限 |
-| `CF_ACCOUNT_ID`  | Secret | 你的 Cloudflare 账户 ID（账户首页右下角可查）                                            |
-| `D1_DATABASE_ID` | Secret | 上面第 3 步 D1 的 `database_id`，用于 CI 替换占位符                                    |
-| ——               | ——     | **`ADMIN_KEY`** **建议在 CI 外手动设置一次**（见下方说明）                                 |
-
-> 获取 `CF_API_TOKEN`：Cloudflare Dashboard → 右上角「My Profile」→ 「API Tokens」→ 创建，模板选
-> 「Edit Cloudflare Workers」，再勾选 R2 / D1 权限。
-
-### 5.2 workflow 内容（`.github/workflows/deploy.yml`）
-
-```yaml
-name: Deploy Worker
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:        # 允许在 GitHub 页面手动触发
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      # 用 GitHub Secrets 注入 D1 database_id，替换 wrangler.jsonc 占位符
-      - name: Inject D1 database_id
-        shell: bash
-        run: |
-          sed -i "s/LOCAL_PLACEHOLDER/${{ secrets.D1_DATABASE_ID }}/g" wrangler.jsonc
-          grep -n "database_id" wrangler.jsonc
-
-      - name: Deploy to Cloudflare Workers
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: deploy
-```
-
-### 5.3 关于 `ADMIN_KEY` 的 CI 处理
-
-`ADMIN_KEY` 通过 `wrangler secret put` 设置，属于 Cloudflare Secret，**不建议**放到 Git 仓库。
-推荐二选一：
-
-- **方案 A（推荐）**：在 CI 外手动执行一次（见「三.5」），CI 只负责代码部署；密钥已持久化在 Cloudflare，无需重复设置。
-
-- **方案 B（可选）**：若想完全自动化，改用一个独立 job 内联设置（注意：secret 一旦已有则保留旧值，幂等）：
-
-  ```yaml
-  - name: Ensure ADMIN_KEY secret
-    env:
-      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-    run: |
-      echo "${{ secrets.ADMIN_KEY }}" | npx wrangler secret put ADMIN_KEY --name crystal-drive
-  ```
-
-  需要额外在仓库配置一个 `ADMIN_KEY` Secret。
-
-***
-
-## 七、环境差异与注意事项
-
-- **本地开发**：绑定在本地无真实资源，D1 / R2 由 Miniflare 模拟；`.dev.vars` 提供 `ADMIN_KEY`。
-  请把 `.dev.vars` 加入 `.gitignore`，不要提交到仓库。
-
-- **数据库迁移**：`ensureSchema` 使用 `CREATE TABLE IF NOT EXISTS`，并对 `shares` 表执行
-  `ADD COLUMN password_hash` 幂等迁移（重复执行安全）。
-
-- **绑定名与资源名**：绑定名（`BUCKET` / `DB`）是代码里用的名字；资源名同取 `crystal-drive`。
-  若改用其他资源名，只需改 `wrangler.jsonc`，但 Database ID 必须对应你的 D1 实例。
-
-- **尺寸限制**：单文件上传上限 100 MB（Worker 请求体限制），超过会被前端拦截提示。
-
-- **自定义域名（可选）**：在 Worker 的「Settings → Domains & Routes」添加自定义域名（需 DNS 在 Cloudflare），
-  或旧式 Routes 绑定。
-
-***
-
-## 八、常见问题
-
-| 问题             | 处理                                                           |
-| -------------- | ------------------------------------------------------------ |
-| 首页 500 / D1 报错 | 确认 `wrangler.jsonc` 的 `database_id` 已替换为真实 ID                |
-| 登录一直失败         | 确认已执行 `npx wrangler secret put ADMIN_KEY`，输入与 `ADMIN_KEY` 一致 |
-| 上传对象在 R2 找不到   | 确认 R2 桶名 `crystal-drive` 已创建且与配置一致                           |
-| 想部署到其它名称       | 改 `wrangler.jsonc` 的 `name` 字段                               |
-| 网页端建了资源，代码还没生效 | 控制台只负责 R2/D1/绑定/密钥，代码需在本地执行一次 `npm run deploy`               |
-
+| 决策 | 理由 |
+|---|---|
+| **原生 HTML + JS，不用 React/Vue** | Worker 对包大小敏感，SPA 纯 HTML 模板 + fetch 就能搞定，省了构建链路和运行时开销 |
+| **Worker Secret 存一切敏感值** | `admin` / `turnstile_secret` / `turnstile_sitekey` / `totp_recovery` 都走 Secret，D1 只存可公开的配置和加密后的派生数据 |
+| **密码双重存储（hash + cipher）** | hash 用于验证，cipher（AES-GCM）用于管理员事后查看。换 admin secret 后 cipher 会失效，但 hash 仍可验证 |
+| **Session Cookie 而不是 JWT** | Worker 冷启动时间对加密无关，Cookie + SameSite 更适合浏览器场景 |
+| **D1 复合主键做计数器** | `turnstile_visits(ip, day)` 天然按天归零，不需要定时任务清理旧数据 |
+| **并发安全用 SQL 原子 UPDATE** | Worker 无锁，靠 SQL `WHERE download_count < max` 拦截超卖 |
+| **waitUntil 异步写日志** | 下载主流程不等待日志写完就返回响应，降低下载首字节延迟 |

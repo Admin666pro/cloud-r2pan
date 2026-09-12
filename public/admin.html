@@ -412,6 +412,59 @@ const I18N = {
     secNoLogs: '还没有登录记录', secSearchPh: '搜索 IP / 浏览器 / 系统…',
     secFilterAll: '全部结果', secFilterSuccess: '仅成功', secFilterFail: '仅失败',
     secActionAll: '全部操作',
+    // 2FA 登录
+    login2faTitle: '两步验证',
+    login2faSub: '请输入 Authenticator 应用中的 6 位验证码',
+    login2faPh: '6 位验证码',
+    login2faCode: '验证码',
+    login2faUseRecovery: '使用恢复码',
+    login2faBack: '← 返回',
+    login2faRecoveryPh: '16 位恢复码（空格可选）',
+    login2faRecoveryHint: '如果 Authenticator 丢失，可以输入恢复码登录并自动关闭 2FA',
+    login2faRecoveryOk: '恢复码验证成功，2FA 已自动重置',
+    // 2FA 设置
+    twofa: '两步验证 (TOTP)',
+    twofaD: '使用 Google Authenticator / Microsoft Authenticator 等应用生成验证码',
+    twofaSetupT: '开启两步验证',
+    twofaSetupD1: '用 Authenticator 扫描下方二维码，或手动输入密钥',
+    twofaSetupKey: '手动输入密钥',
+    twofaSetupCodePh: '输入 6 位验证码',
+    twofaSetupCode: '验证码',
+    twofaSetupDone: '2FA 已开启 ✅',
+    twofaSetupRecoveryT: '请立即保存以下恢复码',
+    twofaSetupRecoveryD: '恢复码可在 Authenticator 丢失时恢复登录。仅本次显示，请复制保存到安全位置。Cloudflare 后台也可以配置超级恢复码作为备份。',
+    twofaSetupRecoveryAll: '全部保存',
+    twofaSetupRecoveryCopied: '恢复码已复制',
+    twofaDisableT: '关闭两步验证',
+    twofaDisableD: '关闭后登录只需管理员密钥，不再需要 2FA 码。请确认你了解风险。',
+    twofaRegenT: '重新生成恢复码',
+    twofaRegenD: '旧的恢复码将全部失效，生成 8 个新的恢复码。',
+    twofaAdminKeyPh: '请输入管理员密钥确认',
+    twofaNoCloudflareRecovery: '未配置 Cloudflare 超级恢复码（可选）',
+    twofaHasCloudflareRecovery: '已配置 Cloudflare 超级恢复码 ✅',
+    twofaRecoveryRemaining: '剩余恢复码 {n} 个',
+    twofaStatusOn: '已开启',
+    twofaStatusOff: '未开启',
+    // Turnstile
+    tsGroupTitle: '🛡️ Cloudflare Turnstile 人机验证',
+    tsGroupD: '防止机器人爬虫滥用分享链接。可按触发时机选择开启，并按每日访问阈值决定对某 IP 是否弹出。',
+    tsMode: '触发时机',
+    tsModeOff: '关闭',
+    tsModeShare: '打开分享链接时',
+    tsModeDownload: '点击下载时',
+    tsModeBoth: '两者都可以（双重保险）',
+    tsThreshold: '每 IP 每日触发阈值（次）',
+    tsThresholdHelp: '0 = 每次都弹；N = 该 IP 当天访问分享页超过 N 次后开始弹',
+    tsSitekeyOverride: 'SiteKey 覆盖（可选）',
+    tsSitekeyOverrideHelp: '如果你没在 Cloudflare Secret 里配 turnstile_sitekey，可在此填入',
+    tsSecretHint: 'Secret 必须在 Cloudflare Secret 里配置 turnstile_secret 才能生效',
+    tsSecretOk: '已配置 ✅',
+    tsSecretMissing: '未配置 ❌',
+    tsSitekeyCloudflareOk: 'SiteKey 已在 Cloudflare Secret 配置 ✅',
+    tsSitekeyCloudflareMissing: '未在 Cloudflare Secret 配置 turnstile_sitekey',
+    tsResetVisits: '重置今日访问计数',
+    tsResetVisitsD: '清空所有 IP 今日访问计数，让它们重新从头开始计数。',
+    tsVisitsReset: '访问计数已重置',
   },
   en: {
     docTitle: '{site} · Admin Console',
@@ -508,6 +561,59 @@ const I18N = {
     secNoLogs: 'No login logs yet', secSearchPh: 'Search IP / browser / OS…',
     secFilterAll: 'All', secFilterSuccess: 'Success only', secFilterFail: 'Fail only',
     secActionAll: 'All actions',
+    // 2FA login
+    login2faTitle: 'Two-Factor Authentication',
+    login2faSub: 'Enter the 6-digit code from your Authenticator app',
+    login2faPh: '6-digit code',
+    login2faCode: 'Code',
+    login2faUseRecovery: 'Use recovery code',
+    login2faBack: '← Back',
+    login2faRecoveryPh: '16-char recovery code (spaces optional)',
+    login2faRecoveryHint: 'If your Authenticator is lost, enter a recovery code to log in and disable 2FA automatically.',
+    login2faRecoveryOk: 'Recovery code accepted. 2FA has been reset.',
+    // 2FA settings
+    twofa: 'Two-Factor Authentication (TOTP)',
+    twofaD: 'Use Google Authenticator / Microsoft Authenticator to generate one-time codes',
+    twofaSetupT: 'Enable Two-Factor Auth',
+    twofaSetupD1: 'Scan the QR code with your Authenticator app, or enter the key manually',
+    twofaSetupKey: 'Manual entry key',
+    twofaSetupCodePh: 'Enter 6-digit code',
+    twofaSetupCode: 'Code',
+    twofaSetupDone: '2FA enabled ✅',
+    twofaSetupRecoveryT: 'Save these recovery codes now',
+    twofaSetupRecoveryD: 'Recovery codes can restore access if your Authenticator is lost. They are shown only once here — copy them to a safe place. You can also configure a Cloudflare fallback code as a backup.',
+    twofaSetupRecoveryAll: 'Copy all',
+    twofaSetupRecoveryCopied: 'Recovery codes copied',
+    twofaDisableT: 'Disable Two-Factor Auth',
+    twofaDisableD: 'After disabling, login only requires your admin key. Make sure you understand the security implications.',
+    twofaRegenT: 'Regenerate recovery codes',
+    twofaRegenD: 'All existing recovery codes will be invalidated. 8 new ones will be generated.',
+    twofaAdminKeyPh: 'Re-enter admin key to confirm',
+    twofaNoCloudflareRecovery: 'No Cloudflare fallback code configured (optional)',
+    twofaHasCloudflareRecovery: 'Cloudflare fallback code configured ✅',
+    twofaRecoveryRemaining: '{n} recovery codes remaining',
+    twofaStatusOn: 'Enabled',
+    twofaStatusOff: 'Disabled',
+    // Turnstile
+    tsGroupTitle: '🛡️ Cloudflare Turnstile',
+    tsGroupD: 'Block bots from abusing your share links. Choose when to trigger and set a daily per-IP threshold to decide who gets challenged.',
+    tsMode: 'Trigger',
+    tsModeOff: 'Off',
+    tsModeShare: 'On share page load',
+    tsModeDownload: 'On download click',
+    tsModeBoth: 'Both (double guard)',
+    tsThreshold: 'Daily per-IP threshold',
+    tsThresholdHelp: '0 = always show; N = show after this IP visits N times today',
+    tsSitekeyOverride: 'SiteKey override (optional)',
+    tsSitekeyOverrideHelp: 'Only needed if you did NOT set turnstile_sitekey as a Cloudflare Secret',
+    tsSecretHint: 'Turnstile requires turnstile_secret to be set as a Cloudflare Secret',
+    tsSecretOk: 'Configured ✅',
+    tsSecretMissing: 'Not configured ❌',
+    tsSitekeyCloudflareOk: 'SiteKey set in Cloudflare Secret ✅',
+    tsSitekeyCloudflareMissing: 'turnstile_sitekey not set in Cloudflare Secret',
+    tsResetVisits: 'Reset visit counters',
+    tsResetVisitsD: 'Clear today\'s per-IP visit counts so everyone starts fresh.',
+    tsVisitsReset: 'Visit counters cleared',
   }
 };
 
@@ -619,14 +725,16 @@ function openModal(html){
 }
 function closeModal(){ $('#modal')?.remove(); }
 
-/* ═══════════ 登录视图 ═══════════ */
+/* ═══════════ 登录视图（支持 2FA 两阶段） ═══════════ */
 let siteTitle = 'cloud-r2pan';
+let loginStage = 'password'; // 'password' | '2fa' | 'recovery'
+let savedLoginKey = ''; // 第一阶段输入的 admin key
+
 function showLogin(){
   document.title = t('docTitle', {site: siteTitle});
-  $('#app').innerHTML = `
-  <div id="login-view">
-    <div class="login-card glass">
-      <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2L21 8.5V15.5L12 22L3 15.5V8.5L12 2Z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round" fill="rgba(255,255,255,.14)"/><path d="M12 2V22M3 8.5L12 15L21 8.5M3 15.5L12 9L21 15.5" stroke="#fff" stroke-width="1.2" opacity=".65"/></svg></div>
+
+  if(loginStage === 'password'){
+    renderLoginCard(`
       <h1>${esc(siteTitle)}</h1>
       <div class="sub">${esc(t('loginSubtitle'))}</div>
       <form id="login-form">
@@ -635,23 +743,115 @@ function showLogin(){
         <div class="err" id="login-err"></div>
       </form>
       <div class="lang-row"><button class="btn sm" id="login-lang">${esc(t('switchTo'))}</button></div>
+    `);
+    $('#login-form').onsubmit = async e => {
+      e.preventDefault();
+      const key = $('#login-key').value.trim();
+      if(!key) return;
+      savedLoginKey = key;
+      $('#login-err').textContent = '';
+      try{
+        const r = await api('/api/admin/login', { method:'POST', body: JSON.stringify({ key }) });
+        if(r.need_2fa){
+          loginStage = '2fa';
+          showLogin();
+        }else{
+          showApp();
+        }
+      }catch(err){
+        $('#login-err').textContent = err.message;
+        shake();
+      }
+    };
+    $('#login-lang').onclick = toggleLang;
+  } else if(loginStage === '2fa'){
+    renderLoginCard(`
+      <h1>${esc(t('login2faTitle'))}</h1>
+      <div class="sub">${esc(t('login2faSub'))}</div>
+      <form id="login-form">
+        <input type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" id="login-code" placeholder="${esc(t('login2faPh'))}" autocomplete="one-time-code" autofocus style="text-align:center;letter-spacing:.4em;font-size:20px">
+        <button class="btn primary" type="submit">${esc(t('login2faCode'))}</button>
+        <div class="err" id="login-err"></div>
+      </form>
+      <div style="margin-top:14px;display:flex;gap:10px;justify-content:center">
+        <button class="btn sm" id="login-back">${esc(t('login2faBack'))}</button>
+        <button class="btn sm" id="login-recovery">${esc(t('login2faUseRecovery'))}</button>
+      </div>
+    `);
+    $('#login-form').onsubmit = async e => {
+      e.preventDefault();
+      const code = $('#login-code').value.trim();
+      if(!/^\d{6}$/.test(code)) return;
+      $('#login-err').textContent = '';
+      try{
+        const r = await api('/api/admin/login', { method:'POST', body: JSON.stringify({ key: savedLoginKey, code }) });
+        showApp();
+      }catch(err){
+        $('#login-err').textContent = err.message;
+        shake();
+      }
+    };
+    $('#login-back').onclick = () => { loginStage = 'password'; showLogin(); };
+    $('#login-recovery').onclick = () => { loginStage = 'recovery'; showLogin(); };
+  } else {
+    renderLoginCard(`
+      <h1>${esc(t('login2faTitle'))}</h1>
+      <div class="sub">${esc(t('login2faRecoveryHint'))}</div>
+      <form id="login-form">
+        <input type="text" id="login-recovery-code" placeholder="${esc(t('login2faRecoveryPh'))}" autocomplete="off" autofocus style="letter-spacing:.15em">
+        <button class="btn primary" type="submit">${esc(t('confirm'))}</button>
+        <div class="err" id="login-err"></div>
+      </form>
+      <div style="margin-top:14px">
+        <button class="btn sm" id="login-back">${esc(t('login2faBack'))}</button>
+      </div>
+    `);
+    $('#login-form').onsubmit = async e => {
+      e.preventDefault();
+      const code = $('#login-recovery-code').value.trim();
+      if(!code) return;
+      $('#login-err').textContent = '';
+      try{
+        const r = await api('/api/admin/login', { method:'POST', body: JSON.stringify({ key: savedLoginKey, code }) });
+        if(r.recovery_used && r.totp_reset){
+          // 弹出恢复成功提示
+          openModal(`
+            <h3>${esc(t('login2faRecoveryOk'))}</h3>
+            <div class="sub">${esc(t('login2faRecoveryHint'))}</div>
+            <div class="actions"><button class="btn primary" id="ok">${esc(t('confirm'))}</button></div>
+          `);
+          $('#ok').onclick = () => { closeModal(); showApp(); };
+          return;
+        }
+        showApp();
+      }catch(err){
+        $('#login-err').textContent = err.message;
+        shake();
+      }
+    };
+    $('#login-back').onclick = () => { loginStage = '2fa'; showLogin(); };
+  }
+  // 焦点处理
+  setTimeout(() => {
+    const el = $('#login-form')?.querySelector('input');
+    if(el) el.focus();
+  }, 50);
+}
+
+function shake(){
+  const c = $('.login-card');
+  if(!c) return;
+  c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake');
+}
+
+function renderLoginCard(bodyHtml){
+  $('#app').innerHTML = `
+  <div id="login-view">
+    <div class="login-card glass">
+      <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2L21 8.5V15.5L12 22L3 15.5V8.5L12 2Z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round" fill="rgba(255,255,255,.14)"/><path d="M12 2V22M3 8.5L12 15L21 8.5M3 15.5L12 9L21 15.5" stroke="#fff" stroke-width="1.2" opacity=".65"/></svg></div>
+      ${bodyHtml}
     </div>
   </div>`;
-  $('#login-form').onsubmit = async e => {
-    e.preventDefault();
-    const key = $('#login-key').value.trim();
-    if(!key) return;
-    try{
-      await api('/api/admin/login', { method:'POST', body: JSON.stringify({ key }) });
-      showApp();
-    }catch(err){
-      $('#login-err').textContent = err.message;
-      $('.login-card').classList.remove('shake'); void $('.login-card').offsetWidth;
-      $('.login-card').classList.add('shake');
-    }
-  };
-  $('#login-lang').onclick = toggleLang;
-  $('#login-key').focus();
 }
 
 /* ═══════════ 主应用 ═══════════ */
@@ -659,6 +859,7 @@ let currentTab = 'overview';
 let logsPage = 1, logsQuery = '';
 
 async function showApp(){
+  loginStage = 'password'; savedLoginKey = '';
   try{
     const s = await api('/api/admin/session');
     siteTitle = s.site_title || siteTitle;
@@ -1160,7 +1361,10 @@ async function loadSecurity(){
 
 /* ═══════════ 设置 ═══════════ */
 async function loadSettings(){
-  const s = await api('/api/admin/settings');
+  const [s, twofaStatus] = await Promise.all([
+    api('/api/admin/settings'),
+    api('/api/admin/2fa/status').catch(() => ({enabled:false, cloudflare_recovery:false, recovery_remaining:0})),
+  ]);
   $('#view').innerHTML = `
     <div class="glass group">
       <div class="row">
@@ -1207,6 +1411,64 @@ async function loadSettings(){
         </div>
       </div>
     </div>
+    <!-- 2FA 组 -->
+    <div class="glass group">
+      <div class="row">
+        <div class="info"><div class="t">🛡️ ${esc(t('twofa'))} ${twofaStatus.enabled ? `<span class="tag active" style="margin-left:6px"><i></i>${esc(t('twofaStatusOn'))}</span>` : `<span class="tag" style="margin-left:6px;background:rgba(255,255,255,.1);color:#a5b4fc"><i></i>${esc(t('twofaStatusOff'))}</span>`}</div>
+        <div class="d">${esc(t('twofaD'))}</div></div>
+        <label class="switch" id="twofa-switch" style="${twofaStatus.enabled ? '' : 'opacity:.5;pointer-events:none'}">
+          <input type="checkbox" ${twofaStatus.enabled ? 'checked' : ''} disabled>
+          <span class="track"><span class="thumb"></span></span>
+        </label>
+      </div>
+      <div class="row" style="flex-direction:column;align-items:flex-start">
+        <div style="font-size:12.5px;color:var(--text-3);line-height:1.7">
+          ${twofaStatus.cloudflare_recovery ? `<span style="color:#6ee7b7">${esc(t('twofaHasCloudflareRecovery'))}</span>` : `<span>${esc(t('twofaNoCloudflareRecovery'))}</span>`}
+          ${twofaStatus.enabled ? ` · ${esc(t('twofaRecoveryRemaining',{n:twofaStatus.recovery_remaining}))}` : ''}
+        </div>
+      </div>
+      <div class="row" style="justify-content:flex-end">
+        ${twofaStatus.enabled
+          ? `<button class="btn sm danger" id="twofa-disable">${esc(t('twofaDisableT'))}</button>
+             <button class="btn sm" id="twofa-regen">${esc(t('twofaRegenT'))}</button>`
+          : `<button class="btn sm primary" id="twofa-setup">${esc(t('twofaSetupT'))}</button>`
+        }
+      </div>
+    </div>
+    <!-- Turnstile 组 -->
+    <div class="glass group">
+      <div class="row">
+        <div class="info"><div class="t">${esc(t('tsGroupTitle'))}</div>
+        <div class="d">${esc(t('tsGroupD'))}</div></div>
+      </div>
+      <div class="row">
+        <label>${esc(t('tsMode'))}</label>
+        <select id="ts-mode" style="padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none">
+          <option value="off" ${s.turnstile_mode==='off'?'selected':''} style="color:#111">${esc(t('tsModeOff'))}</option>
+          <option value="on_share" ${s.turnstile_mode==='on_share'?'selected':''} style="color:#111">${esc(t('tsModeShare'))}</option>
+          <option value="on_download" ${s.turnstile_mode==='on_download'?'selected':''} style="color:#111">${esc(t('tsModeDownload'))}</option>
+          <option value="both" ${s.turnstile_mode==='both'?'selected':''} style="color:#111">${esc(t('tsModeBoth'))}</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>${esc(t('tsThreshold'))}</label>
+        <input type="number" id="ts-threshold" min="0" max="10000" value="${s.turnstile_threshold ?? 5}" style="width:120px;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;text-align:center">
+      </div>
+      <div class="row" style="flex-direction:column;align-items:flex-start">
+        <div style="font-size:12px;color:var(--text-3);line-height:1.6">
+          ${esc(t('tsThresholdHelp'))}<br>
+          ${s.cloudflare_turnstile_secret ? `<span style="color:#6ee7b7">${esc(t('tsSecretOk'))}</span>` : `<span style="color:#fda293">${esc(t('tsSecretMissing'))} — ${esc(t('tsSecretHint'))}</span>`}<br>
+          ${s.cloudflare_turnstile_sitekey ? `<span style="color:#6ee7b7">${esc(t('tsSitekeyCloudflareOk'))}</span>` : `<span style="color:#fde68a">${esc(t('tsSitekeyCloudflareMissing'))}</span>`}
+        </div>
+      </div>
+      <div class="row">
+        <label>${esc(t('tsSitekeyOverride'))}</label>
+        <input type="text" id="ts-sitekey" value="${esc(s.turnstile_sitekey_override ?? '')}" placeholder="0xAAAA..." style="flex:1;padding:8px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
+      </div>
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn sm" id="ts-reset">${esc(t('tsResetVisits'))}</button>
+      </div>
+    </div>
     <button class="btn primary" id="st-save" style="padding:14px 28px;font-size:15px;border-radius:18px">${esc(t('save'))}</button>`;
 
   $('#st-reset-traffic').onclick = async () => {
@@ -1233,11 +1495,123 @@ async function loadSettings(){
       count_window_hours: Number($('#st-window').value) || 0,
       auto_ban: $('#st-autoban').checked,
       ban_hours: Number($('#st-banhours').value) || 0,
+      // Turnstile
+      turnstile_mode: $('#ts-mode').value,
+      turnstile_threshold: Number($('#ts-threshold').value) || 0,
+      turnstile_sitekey_override: $('#ts-sitekey').value.trim(),
     };
     await api('/api/admin/settings', { method:'PUT', body: JSON.stringify(body) });
     toast(t('saved'));
     loadSettings();
   };
+
+  // Turnstile 重置访问计数
+  $('#ts-reset')?.onclick = async () => {
+    if(!(await confirmDialog(t('tsResetVisits'), t('tsResetVisitsD'), false))) return;
+    await api('/api/admin/turnstile/visits', { method:'DELETE' });
+    toast(t('tsVisitsReset'));
+  };
+
+  // 2FA Setup
+  $('#twofa-setup')?.onclick = async () => {
+    const adminKey = await promptAdminKey();
+    if(!adminKey) return;
+    try{
+      const r = await api('/api/admin/2fa/setup', { method:'POST', body: JSON.stringify({ admin_key: adminKey }) });
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(r.uri)}`;
+      openModal(`
+        <h3>${esc(t('twofaSetupT'))}</h3>
+        <div class="sub">${esc(t('twofaSetupD1'))}</div>
+        <div style="text-align:center;margin:10px 0 8px">
+          <img src="${qrUrl}" style="width:200px;height:200px;border-radius:12px;background:#fff;padding:10px">
+        </div>
+        <div style="margin:10px 0;font-size:13px">
+          <div style="color:var(--text-3);margin-bottom:4px">${esc(t('twofaSetupKey'))}:</div>
+          <input readonly value="${esc(r.secret)}" style="width:100%;padding:10px 12px;border-radius:10px;font-family:ui-monospace,'SF Mono',monospace;font-size:13px;color:#a5d8ff;background:rgba(0,0,0,.3);border:1px solid var(--stroke)" onclick="this.select()">
+        </div>
+        <div class="field" style="margin:12px 0">
+          <input type="text" id="2fa-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="${esc(t('twofaSetupCodePh'))}" style="text-align:center;letter-spacing:.4em;font-size:18px">
+        </div>
+        <div class="actions">
+          <button class="btn" data-x>${esc(t('cancel'))}</button>
+          <button class="btn primary" id="2fa-enable">${esc(t('confirm'))}</button>
+        </div>
+      `);
+      $('[data-x]').onclick = closeModal;
+      $('#2fa-enable').onclick = async () => {
+        const code = $('#2fa-code').value.trim();
+        if(!/^\d{6}$/.test(code)) return;
+        try{
+          const en = await api('/api/admin/2fa/enable', { method:'POST', body: JSON.stringify({ admin_key: adminKey, code, secret: r.secret }) });
+          closeModal();
+          // 展示恢复码
+          showRecoveryCodes(en.recovery_codes);
+        }catch(err){ toast(err.message, 'err'); }
+      };
+    }catch(err){ toast(err.message, 'err'); }
+  };
+
+  // ── 2FA Disable ──
+  $('#twofa-disable')?.onclick = async () => {
+    if(!(await confirmDialog(t('twofaDisableT'), t('twofaDisableD'), true))) return;
+    const adminKey = await promptAdminKey();
+    if(!adminKey) return;
+    try{
+      await api('/api/admin/2fa/disable', { method:'POST', body: JSON.stringify({ admin_key: adminKey }) });
+      toast(t('twofaSetupT').includes('开启') ? '2FA 已关闭' : '2FA disabled');
+      loadSettings();
+    }catch(err){ toast(err.message, 'err'); }
+  };
+
+  // ── 2FA Regen Recovery ──
+  $('#twofa-regen')?.onclick = async () => {
+    if(!(await confirmDialog(t('twofaRegenT'), t('twofaRegenD'), false))) return;
+    const adminKey = await promptAdminKey();
+    if(!adminKey) return;
+    try{
+      const r = await api('/api/admin/2fa/regen-recovery', { method:'POST', body: JSON.stringify({ admin_key: adminKey }) });
+      showRecoveryCodes(r.recovery_codes);
+    }catch(err){ toast(err.message, 'err'); }
+  };
+}
+
+function promptAdminKey(){
+  return new Promise(resolve => {
+    openModal(`
+      <h3>${esc(t('twofaAdminKeyPh'))}</h3>
+      <form id="pk-form"><input type="password" id="pk-input" autofocus placeholder="${esc(t('keyPlaceholder'))}" style="text-align:center"></form>
+      <div class="actions" style="margin-top:16px">
+        <button class="btn" data-x>${esc(t('cancel'))}</button>
+        <button class="btn primary" id="pk-ok">${esc(t('confirm'))}</button>
+      </div>
+    `);
+    $('[data-x]').onclick = () => { closeModal(); resolve(null); };
+    $('#pk-ok').onclick = () => { const v = $('#pk-input').value.trim(); closeModal(); resolve(v || null); };
+    $('#pk-form').onsubmit = e => { e.preventDefault(); $('#pk-ok').click(); };
+    setTimeout(() => $('#pk-input').focus(), 50);
+  });
+}
+
+function showRecoveryCodes(codes){
+  openModal(`
+    <h3>✅ ${esc(t('twofaSetupDone'))}</h3>
+    <div class="sub">${esc(t('twofaSetupRecoveryT'))}</div>
+    <div style="margin:10px 0">
+      <div class="banner" style="border-radius:14px;padding:12px 16px">
+        <div class="ic">⚠️</div>
+        <div class="t" style="color:#ffd9a0;font-size:13px">${esc(t('twofaSetupRecoveryD'))}</div>
+      </div>
+      <div style="background:rgba(0,0,0,.3);border-radius:12px;padding:16px;font-family:ui-monospace,'SF Mono',monospace;font-size:14px;color:#fde68a;line-height:1.8">
+        ${codes.map(c => `<div>${esc(c)}</div>`).join('')}
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="rc-copy">${esc(t('copy'))}</button>
+      <button class="btn primary" data-x>${esc(t('close'))}</button>
+    </div>
+  `);
+  $('#rc-copy').onclick = () => copyText(codes.join('\n')).then(() => toast(t('twofaSetupRecoveryCopied')));
+  $('[data-x]').onclick = () => { closeModal(); loadSettings(); };
 }
 
 /* ═══════════ 启动 ═══════════ */

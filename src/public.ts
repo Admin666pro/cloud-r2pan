@@ -7,6 +7,71 @@ import { hmacHex, sha256Hex, randomHex, safeEqual } from "./crypto";
 
 const TOKEN_TTL_MS = 24 * 3600_000; // 授权令牌有效期 24h
 
+/* ═══════════ Turnstile 辅助函数 ═══════════ */
+
+/**
+ * 计算一个 IP 今天已访问过多少次分享页 → 判断是否需要弹 Turnstile。
+ * 同时把计数 +1 写回（用 UPSERT 单次 SQL 原子完成）。
+ */
+async function trackAndGetVisits(env: Env, ip: string): Promise<number> {
+  const day = new Date().toISOString().slice(0, 10);
+  // 先查 +1
+  const upsert = env.db.prepare(
+    `INSERT INTO turnstile_visits(ip, day, count) VALUES(?1, ?2, 1)
+     ON CONFLICT(ip, day) DO UPDATE SET count = count + 1`
+  );
+  await upsert.bind(ip, day).run();
+  const row = await env.db
+    .prepare("SELECT count FROM turnstile_visits WHERE ip = ?1 AND day = ?2")
+    .bind(ip, day)
+    .first<{ count: number }>();
+  return row?.count ?? 1;
+}
+
+/** 判断当前 Turnstile 是否可用（secret 必须在 env 里配） */
+function isTurnstileEnabled(env: Env, settings: { turnstileMode: string; turnstileThreshold: number }): boolean {
+  if (!env.turnstile_secret) return false;
+  if (settings.turnstileMode === "off") return false;
+  return true;
+}
+
+/**
+ * 返回 Turnstile 状态 + sitekey（前端渲染 widget 用）。
+ * 如果 sitekey 没配 → 前端根本不会调 Turnstile 脚本。
+ */
+export function getTurnstileInfo(
+  env: Env,
+  settings: { turnstileMode: string; turnstileSitekeyOverride: string | null }
+): { sitekey: string | null; mode: string } {
+  const sitekey = env.turnstile_sitekey || settings.turnstileSitekeyOverride || null;
+  return { sitekey, mode: settings.turnstileMode };
+}
+
+/**
+ * 验证 Turnstile token —— 向 Cloudflare siteverify 发 POST。
+ * 官方要求 POST application/x-www-form-urlencoded: secret + token
+ */
+export async function verifyTurnstileToken(env: Env, token: string, remoteip: string): Promise<boolean> {
+  if (!env.turnstile_secret || !token) return false;
+  try {
+    const form = new URLSearchParams({
+      secret: env.turnstile_secret,
+      response: token,
+      remoteip,
+    });
+    const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
+    if (!r.ok) return false;
+    const j = (await r.json()) as { success?: boolean; errorcodes?: string[] };
+    return !!j.success;
+  } catch {
+    return false;
+  }
+}
+
 /** 解析 Range 头 → {offset, length}，无效返回 null */
 function parseRange(header: string | null, size: number): { offset: number; length: number } | null {
   if (!header) return null;
@@ -74,6 +139,23 @@ export async function handleShareInfo(req: Request, env: Env, token: string): Pr
   if (row.revoked) status = "gone";
   else if (row.expires_at && row.expires_at < Date.now()) status = "expired";
   else if (row.max_downloads && row.download_count >= row.max_downloads) status = "maxed";
+
+  // Turnstile：在 share 页面加载时统计一次访问，判断是否需要弹
+  const ip = clientIp(req);
+  const enabled = isTurnstileEnabled(env, settings);
+  let needsTurnstile = false;
+  let visitCount = 0;
+  let sitekey: string | null = null;
+  if (enabled) {
+    const { sitekey: sk, mode } = getTurnstileInfo(env, settings);
+    sitekey = sk;
+    // on_share / both 模式都在此时判断
+    if (mode === "on_share" || mode === "both") {
+      visitCount = await trackAndGetVisits(env, ip);
+      needsTurnstile = visitCount > settings.turnstileThreshold;
+    }
+  }
+
   return Response.json({
     status,
     name: row.name,
@@ -86,6 +168,14 @@ export async function handleShareInfo(req: Request, env: Env, token: string): Pr
     needs_password: !!row.password_hash,
     quota_exceeded: quotaExceeded,
     site_title: settings.siteTitle,
+    turnstile: {
+      enabled,
+      sitekey,
+      mode: settings.turnstileMode,
+      threshold: settings.turnstileThreshold,
+      needs_now: needsTurnstile,
+      visit_count: visitCount,
+    },
   });
 }
 
@@ -100,16 +190,33 @@ async function getShare(env: Env, token: string): Promise<ShareWithFile | null> 
     .first<ShareWithFile>();
 }
 
-/** POST /s/:token/verify —— 校验分享密码，成功后颁发短时下载授权令牌 */
+/** POST /s/:token/verify —— 校验分享密码 + 可选 Turnstile，成功后颁发下载令牌 */
 export async function handleVerify(req: Request, env: Env, token: string): Promise<Response> {
   if (req.method !== "POST") return Response.json({ error: "method_not_allowed" }, { status: 405 });
   const row = await getShare(env, token);
   if (!row) return Response.json({ error: "not_found" }, { status: 404 });
-  if (!row.password_hash) return Response.json({ ok: true, url: `/s/${token}/download` });
-  let body: { password?: string } = {};
+  let body: { password?: string; turnstile?: string } = {};
   try {
     body = await req.json();
   } catch {}
+
+  const settings = await getSettings(env);
+  const ip = clientIp(req);
+  const turnstileOn = isTurnstileEnabled(env, settings) && (settings.turnstileMode === "both");
+
+  // Turnstile 校验（both 模式下必须有有效 token）
+  if (turnstileOn) {
+    const pass = await verifyTurnstileToken(env, String(body.turnstile ?? ""), ip);
+    if (!pass) {
+      return Response.json({ error: "turnstile_failed" }, { status: 403 });
+    }
+  }
+
+  // 密码校验
+  if (!row.password_hash) {
+    // 无密码分享 → 如果 Turnstile 通过 + 没密码，直接给下载地址
+    return Response.json({ ok: true, url: `/s/${token}/download` });
+  }
   if (!(await verifyPassword(row.password_hash, String(body.password ?? ""))))
     return Response.json({ error: "bad_password" }, { status: 401 });
   const ticket = await issueToken(env, token);
@@ -225,6 +332,40 @@ export async function handleDownload(
   }
 
   const settings = await getSettings(env);
+
+  // 2.6 Turnstile 下载验证码（on_download / both 模式）
+  if (isTurnstileEnabled(env, settings)) {
+    const url = new URL(req.url);
+    const mode = settings.turnstileMode;
+    const downloadGate = mode === "on_download" || mode === "both";
+    if (downloadGate) {
+      const turnstileToken = url.searchParams.get("cf");
+      // on_download 模式下：没传 token → 弹 Turnstile
+      // both 模式下：token 必须已由 verify 阶段校验，这里只是双重兜底
+      if (!turnstileToken) {
+        return errorPage(
+          req,
+          403,
+          { zh: "需要验证码", en: "Turnstile Required" },
+          {
+            zh: "点击下载前需要先通过人机验证。请刷新页面重试。",
+            en: "Please complete the human verification before downloading. Refresh and try again.",
+          },
+          { siteTitle: settings.siteTitle }
+        );
+      }
+      const pass = await verifyTurnstileToken(env, turnstileToken, ip);
+      if (!pass) {
+        return errorPage(
+          req,
+          403,
+          { zh: "验证码校验失败", en: "Turnstile Failed" },
+          { zh: "人机验证未通过，请刷新页面重试。", en: "Human verification failed. Please refresh and try again." },
+          { siteTitle: settings.siteTitle }
+        );
+      }
+    }
+  }
 
   // 3. 流量限额：达到预设上限立即暂停所有下载（防止流量超额扣费）
   if (settings.trafficLimitBytes > 0 && settings.trafficUsedBytes >= settings.trafficLimitBytes) {

@@ -3,13 +3,14 @@ import type { Env } from "./types";
 /**
  * 数据库初始化 —— 首次请求时自动建表, 无需手动迁移。
  * 表结构:
- *   files          上传到 R2 的文件元数据
- *   shares         分享链接 (token 即主键)
- *   download_logs  下载记录 (IP / 浏览器 / 系统 / 流量)
- *   login_logs     管理员登录记录 (成功/失败/登出, 防盗号审计)
- *   banned_ips     封禁名单 (支持到期自动解封)
- *   settings       可调参数 + 流量用量统计
- *   traffic_stats  每日流量/下载汇总 (用于图表)
+ *   files              上传到 R2 的文件元数据
+ *   shares             分享链接 (token 即主键)
+ *   download_logs      下载记录 (IP / 浏览器 / 系统 / 流量)
+ *   login_logs         管理员登录记录 (成功/失败/登出, 防盗号审计)
+ *   turnstile_visits   IP 每日访问计数 (超过阈值触发 Turnstile)
+ *   banned_ips         封禁名单 (支持到期自动解封)
+ *   settings           可调参数 + 流量用量统计
+ *   traffic_stats      每日流量/下载汇总 (用于图表)
  */
 const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS files (
@@ -61,6 +62,13 @@ const SCHEMA_STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_login_logs_created ON login_logs(created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_login_logs_ip ON login_logs(ip)`,
+  `CREATE TABLE IF NOT EXISTS turnstile_visits (
+    ip TEXT NOT NULL,
+    day TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY(ip, day)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_turnstile_day ON turnstile_visits(day)`,
   `CREATE TABLE IF NOT EXISTS banned_ips (
     ip TEXT PRIMARY KEY,
     reason TEXT,

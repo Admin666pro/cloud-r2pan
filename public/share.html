@@ -90,6 +90,25 @@ h1 { font-size: 21px; font-weight: 700; letter-spacing: -.02em; word-break: brea
   transition: all .2s; vertical-align: 1px; }
 .lang-btn:hover { background: rgba(255,255,255,.2); color: #fff; }
 
+/* GitHub Octocat 悬浮按钮 */
+.octo-float {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, rgba(255,255,255,.2), rgba(255,255,255,.05));
+  border: 1px solid rgba(255,255,255,.28);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; text-decoration: none; z-index: 50;
+  box-shadow: 0 8px 22px rgba(0,0,0,.35);
+  transition: transform .25s cubic-bezier(.22,1.2,.36,1), box-shadow .25s;
+}
+.octo-float:hover { transform: translateY(-3px) scale(1.08); box-shadow: 0 12px 30px rgba(0,0,0,.45); }
+.octo-float svg { width: 22px; height: 22px; color: #fff; }
+
 .pw { margin-top: 6px; }
 .pw input {
   width: 100%; margin-top: 22px; padding: 16px; border-radius: 16px; text-align: center;
@@ -102,6 +121,19 @@ h1 { font-size: 21px; font-weight: 700; letter-spacing: -.02em; word-break: brea
 .pw .pw-hint { margin-top: 12px; font-size: 12.5px; color: rgba(255,255,255,.55); }
 .pw.shake input { animation: shake .5s; }
 @keyframes shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-8px)} 40%,80%{transform:translateX(8px)} }
+
+/* Turnstile */
+.ts-wrap {
+  width: 100%; margin-top: 22px; display: flex; justify-content: center;
+}
+.ts-wrap div, .ts-wrap iframe { border-radius: 14px !important; }
+.ts-passed {
+  width: 100%; margin-top: 22px; padding: 14px; border-radius: 16px;
+  background: rgba(110,231,183,.15); border: 1px solid rgba(110,231,183,.4);
+  color: #6ee7b7; font-size: 14px; text-align: center; font-weight: 600;
+}
+.ts-blocked-title { margin-top: 22px; font-size: 14px; color: #fde68a; font-weight: 600; }
+.ts-blocked-hint { margin-top: 6px; font-size: 12.5px; color: rgba(255,255,255,.6); line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -115,6 +147,14 @@ h1 { font-size: 21px; font-weight: 700; letter-spacing: -.02em; word-break: brea
 </div>
 
 <div class="brand"><span id="brand-text">Powered by <b>cloud-r2pan</b></span><button class="lang-btn" id="lang-toggle"></button></div>
+
+<!-- GitHub Octocat 悬浮 -->
+<a class="octo-float" href="https://github.com/Admin666pro/cloud-oauth2" target="_blank" rel="noopener noreferrer" title="GitHub">
+  <!-- Octocat silhouette — GitHub 官方吉祥物 -->
+  <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <path d="M12 .5C5.73.5.75 5.48.75 11.75c0 4.97 3.22 9.19 7.69 10.68.56.1.77-.24.77-.54 0-.27-.01-1.16-.02-2.11-3.13.68-3.79-1.34-3.79-1.34-.51-1.3-1.25-1.64-1.25-1.64-1.02-.7.08-.68.08-.68 1.13.08 1.72 1.16 1.72 1.16 1 1.71 2.63 1.22 3.27.93.1-.73.39-1.22.71-1.5-2.5-.28-5.13-1.25-5.13-5.57 0-1.23.44-2.24 1.16-3.03-.12-.28-.5-1.43.11-2.99 0 0 .95-.3 3.11 1.15.9-.25 1.87-.37 2.83-.37.96 0 1.93.12 2.83.37 2.16-1.45 3.11-1.15 3.11-1.15.61 1.56.23 2.71.11 2.99.72.79 1.16 1.8 1.16 3.03 0 4.33-2.64 5.28-5.14 5.56.4.34.76 1.02.76 2.07 0 1.5-.01 2.71-.01 3.08 0 .3.21.65.78.54 4.46-1.49 7.68-5.71 7.68-10.68C23.25 5.48 18.27.5 12 .5z"/>
+  </svg>
+</a>
 
 <script>
 /* ═══════════ i18n ═══════════ */
@@ -136,6 +176,14 @@ const I18N = {
     quotaWarn: '⚠️ 本月流量已达预设限额，下载服务已临时暂停，请联系管理员。',
     hint: '下载由 {site} 提供 · 请勿重复下载',
     switchTo: 'EN',
+    // Turnstile
+    turnstileBlocked: '🛡️ 需要完成人机验证',
+    turnstileHint: '该链接被管理员设为需要验证，请完成下方的人机检查后继续下载',
+    turnstileLoading: '正在加载验证组件…',
+    turnstilePass: '验证通过 ✓',
+    turnstileFail: '验证失败，请重试',
+    turnstileContinue: '继续下载',
+    turnstileDownloadNow: '立即下载',
   },
   en: {
     pageTitle: 'Share · {site}',
@@ -154,6 +202,14 @@ const I18N = {
     quotaWarn: '⚠️ Monthly traffic quota reached. Downloads are temporarily paused. Please contact the administrator.',
     hint: 'Served by {site} · Please avoid duplicate downloads',
     switchTo: '中文',
+    // Turnstile
+    turnstileBlocked: '🛡️ Human verification required',
+    turnstileHint: 'This link has been marked for verification. Please complete the check below to continue.',
+    turnstileLoading: 'Loading verification widget…',
+    turnstilePass: 'Verified ✓',
+    turnstileFail: 'Verification failed, please retry',
+    turnstileContinue: 'Continue download',
+    turnstileDownloadNow: 'Download now',
   }
 };
 
@@ -217,6 +273,41 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 
 const token = location.pathname.split('/')[2];
 
+let TURSTILE_LOADED = false, turnstileReady = false, pendingCb = null;
+function loadTurnstileScript(onload){
+  if(TURSTILE_LOADED){ if(window.turnstile){ window.turnstile.ready(cb=>{ turnstileReady = true; onload&&onload(cb); }); } return; }
+  TURSTILE_LOADED = true;
+  window.onTurnstileLoad = () => { turnstileReady = true; onload && onload(window.turnstile); };
+  const s = document.createElement('script');
+  s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad';
+  s.async = true; s.defer = true;
+  document.head.appendChild(s);
+}
+
+/**
+ * 渲染 Turnstile widget 并等待完成。
+ * 返回 Promise<string> —— token 字符串。
+ */
+async function renderTurnstile(containerEl, sitekey){
+  containerEl.innerHTML = '<div class="ts-wrap"><div class="ts-box" data-sitekey="'+sitekey+'"></div></div>';
+  loadTurnstileScript();
+  // 等待 window.turnstile 出现
+  await new Promise(resolve => {
+    const check = () => { if(window.turnstile){ resolve(); } else { setTimeout(check, 80); } };
+    check();
+  });
+  return await new Promise((resolve, reject) => {
+    const id = window.turnstile.render(containerEl.querySelector('.ts-box'), {
+      sitekey,
+      theme: 'auto',
+      callback: (tk) => resolve(tk),
+      'error-callback': () => reject(new Error('ts_error')),
+      'timeout-callback': () => reject(new Error('ts_timeout')),
+    });
+    containerEl.dataset.tsWidgetId = id;
+  });
+}
+
 async function boot(){
   let info;
   try{
@@ -246,6 +337,13 @@ function render(d, siteName){
   }[d.status];
   if(gone){ renderError(gone[0],gone[1]); return; }
 
+  // Turnstile 判断：后端返回了 needs_now (on_share 模式已判断) 或 mode=on_download 时需要
+  const ts = d.turnstile || {};
+  const tsEnabled = ts.enabled && ts.sitekey;
+  const tsOnShare = ts.mode === 'on_share' || ts.mode === 'both';
+  const tsOnDownload = ts.mode === 'on_download' || ts.mode === 'both';
+  const needTsNow = tsEnabled && ((tsOnShare && ts.needs_now) || (tsOnDownload));
+
   $('#app').innerHTML = `
     <div class="file-icon"><span class="ext" style="color:${extColor(d.name)}">${esc((ext||'FILE').toUpperCase())}</span></div>
     <h1>${esc(d.name)}</h1>
@@ -260,6 +358,13 @@ function render(d, siteName){
       <div class="stat"><div class="v">${fmtSize(d.size)}</div><div class="k">${esc(t('size'))}</div></div>
     </div>
     ${d.quota_exceeded?`<div class="warn">${esc(t('quotaWarn'))}</div>`:''}
+
+    ${needTsNow && !d.quota_exceeded ? `
+      <div class="ts-blocked-title">${esc(t('turnstileBlocked'))}</div>
+      <div class="ts-blocked-hint">${esc(t('turnstileHint'))}</div>
+      <div id="ts-container" style="margin-top:6px">${esc(t('turnstileLoading'))}</div>
+    ` : ''}
+
     ${d.needs_password && !d.quota_exceeded ? `
       <div class="pw" id="pw-box">
         <div class="pw-hint">${esc(t('protected'))}</div>
@@ -271,28 +376,101 @@ function render(d, siteName){
         </a>
         <div class="pw-hint">${esc(t('unlockHint'))}</div>
       </div>`
-      :`<a class="btn" id="dl" href="/s/${token}/download" ${d.quota_exceeded?'style="pointer-events:none;opacity:.45"':''}>
+      :`<a class="btn" id="dl" href="javascript:void(0)" ${d.quota_exceeded?'style="pointer-events:none;opacity:.45"':''}>
         <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4 20h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         ${esc(t('download'))}
       </a>
       <div class="hint">${esc(t('hint', {site: siteName}))}</div>`}
   `;
-  if(d.needs_password && $('#pw')) wireUnlock(token);
+
+  // 下载按钮绑定
+  if(!d.needs_password && !d.quota_exceeded){
+    $('#dl').onclick = () => triggerDownload(d, ts, tsEnabled, tsOnDownload);
+  }
+
+  if(d.needs_password && $('#pw')) wireUnlock(d, ts, tsEnabled, tsOnDownload);
+
+  // 如果 on_share 模式需要弹 Turnstile，现在就开始渲染
+  if(needTsNow && tsOnShare && ts.sitekey){
+    const box = $('#ts-container');
+    renderTurnstile(box, ts.sitekey).then(tk => {
+      box.innerHTML = `<div class="ts-passed">${esc(t('turnstilePass'))}</div>`;
+      window.__tsToken = tk;
+    }).catch(() => { box.innerHTML = `<div class="warn" style="text-align:center;font-size:12.5px">${esc(t('turnstileFail'))}</div>`; });
+  }
 }
 
-async function wireUnlock(token){
+async function triggerDownload(d, ts, tsEnabled, tsOnDownload){
+  const baseUrl = `/s/${token}/download`;
+  // both / on_download 模式：先确保有 token
+  if(tsEnabled && tsOnDownload){
+    let tk = window.__tsToken;
+    if(!tk){
+      // 还没渲染过 → 现在渲染
+      const box = document.createElement('div');
+      box.style.cssText = 'margin-top:20px';
+      document.body.appendChild(box);
+      try{
+        tk = await renderTurnstile(box, ts.sitekey);
+        window.__tsToken = tk;
+        box.remove();
+      }catch{ box.remove(); return; }
+    }
+    location.href = `${baseUrl}?cf=${tk}`;
+  } else {
+    location.href = baseUrl;
+  }
+}
+
+async function wireUnlock(d, ts, tsEnabled, tsOnDownload){
   const btn = $('#pw-go'), input = $('#pw'), err = $('#pw-err');
   const unlock = async () => {
     const pass = input.value;
     if(!pass) return;
     btn.style.pointerEvents = 'none'; btn.style.opacity = '.6';
     err.textContent = '';
+    // both 模式：需要 Turnstile token
+    let turnstileToken = null;
+    if(tsEnabled && ts.mode === 'both'){
+      let tk = window.__tsToken;
+      if(!tk){
+        const box = document.createElement('div');
+        box.style.cssText = 'margin-top:14px';
+        document.getElementById('pw-box').appendChild(box);
+        try{
+          tk = await renderTurnstile(box, ts.sitekey);
+          window.__tsToken = tk;
+          box.innerHTML = `<div class="ts-passed">${esc(t('turnstilePass'))}</div>`;
+        }catch(e){ box.remove(); err.textContent = t('turnstileFail'); btn.style.pointerEvents = ''; btn.style.opacity = ''; return; }
+      }
+      turnstileToken = tk;
+    }
     try{
-      const r = await fetch(`/s/${token}/verify`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ password: pass }) });
-      let d = {};
-      try{ d = await r.json(); }catch{}
-      if(r.ok && d.url){ location.href = d.url; return; }
-      err.textContent = t(d.error === 'bad_password' ? 'wrongPassword' : 'wrongPassword');
+      const body = { password: pass };
+      if(turnstileToken) body.turnstile = turnstileToken;
+      const r = await fetch(`/s/${token}/verify`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
+      let res = {};
+      try{ res = await r.json(); }catch{}
+      if(r.ok && res.url){
+        // on_download 模式需要 cf 参数
+        if(tsEnabled && tsOnDownload && !res.url.includes('cf=')){
+          let tk = window.__tsToken;
+          if(!tk){
+            const box = document.createElement('div');
+            box.style.cssText = 'margin-top:14px';
+            document.getElementById('pw-box').appendChild(box);
+            tk = await renderTurnstile(box, ts.sitekey);
+            window.__tsToken = tk;
+            box.innerHTML = `<div class="ts-passed">${esc(t('turnstilePass'))}</div>`;
+          }
+          const sep = res.url.includes('?') ? '&' : '?';
+          location.href = res.url + sep + 'cf=' + tk;
+        } else {
+          location.href = res.url;
+        }
+        return;
+      }
+      err.textContent = t(res.error === 'bad_password' ? 'wrongPassword' : 'wrongPassword');
       $('#pw-box').classList.remove('shake'); void $('#pw-box').offsetWidth; $('#pw-box').classList.add('shake');
       input.select();
     }catch{
