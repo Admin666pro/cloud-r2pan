@@ -10,6 +10,7 @@ import {
   handleOAuthLogout,
   handleOAuthProviders,
 } from "./oauth_handlers";
+import { findCodeByString, formatCodeStatus, checkCodeUsable } from "./codes";
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -63,6 +64,32 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   }
   if (path === "/oauth/logout" && (req.method === "POST" || req.method === "GET")) {
     return handleOAuthLogout(req);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // 公开激活码查询接口（任何人可以查某个码的余额 / 状态）
+  // GET /api/codes/status?code=R2PAN-XXXX-XXXX-XXXX
+  // ══════════════════════════════════════════════════════════════
+  if (path === "/api/codes/status" && req.method === "GET") {
+    await ensureSchema(env);
+    const code = (new URL(req.url).searchParams.get("code") || "").trim().toUpperCase();
+    if (!code) {
+      return Response.json({ ok: false, error: "missing_code" }, { status: 400 });
+    }
+    const row = await findCodeByString(env, code);
+    if (!row) {
+      return Response.json({ ok: false, error: "not_found", message: "码不存在" }, { status: 404 });
+    }
+    const check = checkCodeUsable(row as any);
+    const status = formatCodeStatus(row as any);
+    return Response.json({
+      ok: true,
+      code: row.code,
+      usable: check.ok,
+      reason: check.reason,
+      message: check.message,
+      status,
+    });
   }
 
   // 公开分享页 /s/:token[...]

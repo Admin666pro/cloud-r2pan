@@ -1,5 +1,6 @@
 import type { Env } from "./types";
 import { ensureSchema, randomId } from "./db";
+import { generateCodes, makeBatchId, formatCodeStatus, findCodeByString } from "./codes";
 import { getSettings, updateSettings } from "./settings";
 import { checkAdminKey, createSession, verifySession, clientIp, rateLimitLogin, requireAdminIp } from "./auth";
 import { pickLang } from "./i18n";
@@ -998,4 +999,200 @@ export async function handleAdminApi(
   }
 
   return json({ error: "not_found" }, 404);
+
+  // ─═════════════════════════════════════════════════════════════════
+  // 激活码管理
+  // ─═════════════════════════════════════════════════════════════════
+
+  // POST /api/admin/codes/generate — 批量生成
+  // body: { plan_name, traffic_bytes, days_valid, count, quota_message?, batch_id?, notes? }
+  if (path === "/api/admin/codes/generate" && method === "POST") {
+    const body = await readJson<{
+      plan_name?: string;
+      traffic_bytes?: number;
+      days_valid?: number;
+      count?: number;
+      quota_message?: string;
+      batch_id?: string;
+      notes?: string;
+    }>(req);
+    const count = Math.max(1, Math.min(10000, Number(body.count) || 100));
+    const traffic = Math.max(0, Number(body.traffic_bytes) || 0);
+    const days = Math.max(0, Number(body.days_valid) || 0);
+    if (traffic === 0 && days === 0) {
+      return json({ error: msg(req, "至少设置流量额度或有效天数之一", "Set at least traffic OR days_valid") }, 400);
+    }
+
+    const batchIdRaw = (body.batch_id ?? "").trim();
+    const batchId = batchIdRaw ? batchIdRaw : makeBatchId();
+    const now = Date.now();
+    const ids = generateCodes(count);
+
+    // 用 batch 高效插入
+    const stmts = ids.map((code) =>
+      env.db
+        .prepare(
+          `INSERT INTO activation_codes
+           (id, code, plan_id, traffic_bytes, used_bytes, days_valid, quota_message, status, batch_id, notes, created_at, activated_at, expires_at)
+           VALUES(?1, ?2, ?3, ?4, 0, ?5, ?6, 'unused', ?7, ?8, ?9, NULL, NULL)`
+        )
+        .bind(
+          randomId(12),
+          code,
+          body.plan_name || null,
+          traffic,
+          days,
+          (typeof body.quota_message === "string" && body.quota_message.trim()) || null,
+          batchId,
+          (typeof body.notes === "string" && body.notes.trim()) || null,
+          now
+        )
+    );
+    await env.db.batch(stmts);
+    return json({ ok: true, batch_id: batchId, count, codes: ids.slice(0, 50) });
+  }
+
+  // GET /api/admin/codes — 列表（支持 ?status=&batch_id=&plan=&page=&export=1）
+  if (path === "/api/admin/codes" && method === "GET") {
+    const sp = new URL(req.url).searchParams;
+    const status = sp.get("status");
+    const batchId = sp.get("batch_id");
+    const plan = sp.get("plan");
+    const q = sp.get("q");
+    const exportCsv = sp.get("export") === "1";
+    const page = Math.max(1, Number(sp.get("page")) || 1);
+    const pageSize = Math.min(500, Math.max(10, Number(sp.get("size")) || 50));
+    const offset = (page - 1) * pageSize;
+
+    const where: string[] = [];
+    const binds: any[] = [];
+    if (status) { where.push("status = ?"); binds.push(status); }
+    if (batchId) { where.push("batch_id = ?"); binds.push(batchId); }
+    if (plan) { where.push("plan_id = ?"); binds.push(plan); }
+    if (q) { where.push("(code LIKE ? OR notes LIKE ?)"); binds.push(`%${q}%`, `%${q}%`); }
+
+    const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
+    const countSql = `SELECT COUNT(*) AS c FROM activation_codes ${whereSql}`;
+    const listSql = `SELECT * FROM activation_codes ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+
+    const total = (await env.db.prepare(countSql).bind(...binds).first<{ c: number }>())?.c ?? 0;
+    const results = (await env.db.prepare(listSql).bind(...binds, pageSize, offset).all()).results as any[];
+
+    const rows = results.map((r) => {
+      const status = formatCodeStatus(r);
+      return {
+        id: r.id,
+        code: r.code,
+        plan_id: r.plan_id,
+        batch_id: r.batch_id,
+        notes: r.notes,
+        traffic_bytes: r.traffic_bytes,
+        used_bytes: r.used_bytes,
+        days_valid: r.days_valid,
+        quota_message: r.quota_message,
+        status: r.status,
+        remaining: status?.remaining,
+        pct: status?.pct,
+        expired: status?.expired,
+        created_at: r.created_at,
+        activated_at: r.activated_at,
+        expires_at: r.expires_at,
+      };
+    });
+
+    if (exportCsv) {
+      const csvRows = [
+        "code,plan_id,batch_id,traffic_bytes,used_bytes,days_valid,status,quota_message,notes,created_at,activated_at,expires_at",
+      ];
+      const allResults = (await env.db.prepare(`SELECT * FROM activation_codes ${whereSql} ORDER BY created_at DESC`).bind(...binds).all()).results as any[];
+      for (const r of allResults) {
+        const esc = (v: any) => {
+          if (v == null) return "";
+          const s = String(v).replace(/"/g, '""');
+          return /[",\n]/.test(s) ? `"${s}"` : s;
+        };
+        csvRows.push(
+          [r.code, r.plan_id ?? "", r.batch_id ?? "", r.traffic_bytes, r.used_bytes, r.days_valid, r.status, esc(r.quota_message), esc(r.notes), r.created_at ?? "", r.activated_at ?? "", r.expires_at ?? ""].join(",")
+        );
+      }
+      const body = csvRows.join("\n");
+      const filename = `activation_codes_${new Date().toISOString().slice(0, 10)}.csv`;
+      return new Response(body, {
+        status: 200,
+        headers: {
+          "content-type": "text/csv;charset=utf-8",
+          "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        },
+      });
+    }
+
+    return json({ rows, total, page, page_size: pageSize });
+  }
+
+  // POST /api/admin/codes/:id/revoke — 作废一个码
+  const codeRevokeMatch = /^\/api\/admin\/codes\/([^/]+)\/revoke$/.exec(path);
+  if (codeRevokeMatch && method === "POST") {
+    await env.db.prepare("UPDATE activation_codes SET status = 'revoked' WHERE id = ?1").bind(codeRevokeMatch![1]).run();
+    return json({ ok: true });
+  }
+
+  // POST /api/admin/codes/batch-revoke — 按 batch_id 整批作废
+  if (path === "/api/admin/codes/batch-revoke" && method === "POST") {
+    const body = await readJson<{ batch_id?: string; codes?: string[] }>(req);
+    if (body.batch_id) {
+      const r = await env.db.prepare("UPDATE activation_codes SET status = 'revoked' WHERE batch_id = ?1 AND status != 'revoked'").bind(body.batch_id).run();
+      return json({ ok: true, updated: r.meta.changes ?? 0 });
+    }
+    const codes: string[] = (body.codes ?? []) as string[];
+    if (codes.length > 0) {
+      const stmts = codes.map((c) =>
+        env.db.prepare("UPDATE activation_codes SET status = 'revoked' WHERE code = ?1").bind(c)
+      );
+      await env.db.batch(stmts);
+      return json({ ok: true, count: codes.length });
+    }
+    return json({ error: msg(req, "缺少 batch_id 或 codes", "Missing batch_id or codes") }, 400);
+  }
+
+  // GET /api/admin/codes/batches — 列出所有 batch_id（用于过滤 UI）
+  if (path === "/api/admin/codes/batches" && method === "GET") {
+    const rows = (await env.db.prepare(
+      "SELECT batch_id, COUNT(*) AS n FROM activation_codes WHERE batch_id IS NOT NULL GROUP BY batch_id ORDER BY MAX(created_at) DESC"
+    ).all()).results as any[];
+    return json({ batches: rows.map((r) => ({ batch_id: r.batch_id, count: r.n })) });
+  }
+
+  // GET /api/admin/codes/usage?batch=&plan= — 流量用量汇总
+  if (path === "/api/admin/codes/usage" && method === "GET") {
+    const sp = new URL(req.url).searchParams;
+    const where: string[] = [];
+    const binds: any[] = [];
+    if (sp.get("batch")) { where.push("batch_id = ?"); binds.push(sp.get("batch")); }
+    if (sp.get("plan")) { where.push("plan_id = ?"); binds.push(sp.get("plan")); }
+    const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
+
+    const summary = await env.db.prepare(
+      `SELECT
+         COUNT(*) AS total,
+         SUM(CASE WHEN status = 'unused' THEN 1 ELSE 0 END) AS unused,
+         SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
+         SUM(CASE WHEN status = 'revoked' THEN 1 ELSE 0 END) AS revoked,
+         SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) AS expired,
+         SUM(CASE WHEN status = 'exhausted' THEN 1 ELSE 0 END) AS exhausted,
+         SUM(used_bytes) AS used_bytes,
+         SUM(traffic_bytes) AS total_bytes
+       FROM activation_codes ${whereSql}`
+    ).bind(...binds).first() as any;
+
+    // 各 batch 汇总
+    const batches = where.length ? [] : (await env.db.prepare(
+      `SELECT batch_id, COUNT(*) AS n, SUM(used_bytes) AS used_bytes, SUM(traffic_bytes) AS total_bytes
+       FROM activation_codes
+       WHERE batch_id IS NOT NULL
+       GROUP BY batch_id
+       ORDER BY MAX(created_at) DESC`
+    ).all()).results;
+
+    return json({ summary, batches });
+  }
 }

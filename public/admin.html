@@ -522,6 +522,60 @@ const I18N = {
     confirmOAuthDeleteD: '删除后此 Provider 的配置将永久删除。已生成的 OAuth2 会话不受影响，但新登录请求将无法使用此 Provider。确定删除吗？',
     custom: '自定义',
     cancel: '取消',
+    // 激活码
+    tabCodes: '激活码',
+    codesTitle: '🎟️ 激活码管理',
+    codesSub: '批量生成带独立流量额度的激活码，用户使用激活码下载不受全局流量限制。额度耗尽或过期自动停用。',
+    codesUsageTitle: '用量概览',
+    codesGenerateTitle: '批量生成激活码',
+    codesBatchId: '批次标识（自动生成）',
+    codesPlanName: '分类/套餐名（可选）',
+    codesCount: '生成数量',
+    codesTraffic: '总流量额度 (GB，0=纯时效码)',
+    codesDays: '有效天数 (0=不限)',
+    codesQuotaMsg: '耗尽时自定义提示（可选）',
+    codesNotes: '备注（可选）',
+    codesGenerate: '生成激活码',
+    codesGeneratedN: '成功生成 {n} 个激活码',
+    codesGeneratedPreview: '前 50 个激活码（其余请用 CSV 导出完整列表）',
+    codesExportCsv: '导出 CSV',
+    codesListTitle: '激活码列表',
+    codesFilterStatus: '状态',
+    codesFilterBatch: '批次',
+    codesFilterPlan: '分类',
+    codesFilterQ: '搜索码/备注',
+    codesFilterAll: '全部',
+    codesColCode: '激活码',
+    codesColPlan: '分类',
+    codesColBatch: '批次',
+    codesColTraffic: '流量额度',
+    codesColUsed: '已用',
+    codesColDays: '有效天数',
+    codesColStatus: '状态',
+    codesColCreated: '创建时间',
+    codesColActivated: '首次使用',
+    codesColExpires: '过期时间',
+    codesRevokeOne: '作废',
+    codesRevokeBatch: '按批次作废',
+    codesRevokeCodes: '按码作废',
+    codesConfirmRevokeT: '确认作废',
+    codesConfirmRevokeD: '作废后该激活码将无法继续使用，已使用的流量记录保留。',
+    codesBatchRevokeOk: '已作废 {n} 个激活码',
+    codesStatusUnused: '未使用',
+    codesStatusActive: '使用中',
+    codesStatusExpired: '已过期',
+    codesStatusExhausted: '已耗尽',
+    codesStatusRevoked: '已作废',
+    codesRemainingInfinite: '无限',
+    codesUnlimited: '不限',
+    codesNoCodes: '暂无激活码',
+    codesQueryRemain: '查询剩余流量',
+    codesQueryRemainPh: '输入激活码查询剩余额度',
+    codesQueryRemainBtn: '查询',
+    codesQueryNotFound: '激活码不存在',
+    codesQueryResult: '剩余 {remaining} / 总 {total}',
+    codesQueryResultInfinite: '剩余 ∞ (无限额度)',
+    codesPerBatch: '批次 {id}',
   },
   en: {
     docTitle: '{site} · Admin Console',
@@ -726,6 +780,60 @@ const I18N = {
     confirmDeleteTitle: 'Confirm Delete',
     confirmOAuthDeleteD: 'This provider config will be permanently deleted. Existing OAuth sessions remain valid, but new login requests cannot use this provider. Are you sure?',
     custom: 'Custom',
+    // Activation Codes
+    tabCodes: 'Codes',
+    codesTitle: '🎟️ Activation Codes',
+    codesSub: 'Generate activation codes with independent traffic quotas. Users using codes bypass the global traffic limit. Codes auto-stop when quota or time expires.',
+    codesUsageTitle: 'Usage Summary',
+    codesGenerateTitle: 'Batch Generate Codes',
+    codesBatchId: 'Batch ID (auto-generated)',
+    codesPlanName: 'Plan / Category (optional)',
+    codesCount: 'Count',
+    codesTraffic: 'Total traffic quota (GB, 0 = time-only)',
+    codesDays: 'Valid days (0 = unlimited)',
+    codesQuotaMsg: 'Custom exhaustion message (optional)',
+    codesNotes: 'Notes (optional)',
+    codesGenerate: 'Generate Codes',
+    codesGeneratedN: 'Generated {n} codes',
+    codesGeneratedPreview: 'First 50 codes (use CSV export for the full list)',
+    codesExportCsv: 'Export CSV',
+    codesListTitle: 'Codes List',
+    codesFilterStatus: 'Status',
+    codesFilterBatch: 'Batch',
+    codesFilterPlan: 'Plan',
+    codesFilterQ: 'Search code / notes',
+    codesFilterAll: 'All',
+    codesColCode: 'Code',
+    codesColPlan: 'Plan',
+    codesColBatch: 'Batch',
+    codesColTraffic: 'Quota',
+    codesColUsed: 'Used',
+    codesColDays: 'Days',
+    codesColStatus: 'Status',
+    codesColCreated: 'Created',
+    codesColActivated: 'First Used',
+    codesColExpires: 'Expires',
+    codesRevokeOne: 'Revoke',
+    codesRevokeBatch: 'Revoke by Batch',
+    codesRevokeCodes: 'Revoke by Codes',
+    codesConfirmRevokeT: 'Confirm Revoke',
+    codesConfirmRevokeD: 'After revocation, this code can no longer be used. Traffic history is preserved.',
+    codesBatchRevokeOk: '{n} codes revoked',
+    codesStatusUnused: 'Unused',
+    codesStatusActive: 'Active',
+    codesStatusExpired: 'Expired',
+    codesStatusExhausted: 'Exhausted',
+    codesStatusRevoked: 'Revoked',
+    codesRemainingInfinite: '∞',
+    codesUnlimited: '∞',
+    codesNoCodes: 'No activation codes yet',
+    codesQueryRemain: 'Check Remaining',
+    codesQueryRemainPh: 'Enter a code to check remaining quota',
+    codesQueryRemainBtn: 'Check',
+    codesQueryNotFound: 'Code not found',
+    codesQueryResult: 'Remaining {remaining} / Total {total}',
+    codesQueryResultInfinite: 'Remaining ∞ (unlimited)',
+    codesPerBatch: 'Batch {id}',
   }
 };
 
@@ -996,6 +1104,7 @@ async function showApp(){
       <button data-tab="shares">${esc(t('tabShares'))}</button>
       <button data-tab="logs">${esc(t('tabLogs'))}</button>
       <button data-tab="bans">${esc(t('tabBans'))}</button>
+      <button data-tab="codes">${esc(t('tabCodes'))}</button>
       <button data-tab="security">${esc(t('tabSecurity'))}</button>
       <button data-tab="settings">${esc(t('tabSettings'))}</button>
     </div>
@@ -1013,7 +1122,7 @@ function switchTab(tab){
   $$('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   const v = $('#view');
   v.innerHTML = '<div class="spin"></div>';
-  ({ overview: loadOverview, files: loadFiles, shares: loadShares, logs: loadLogs, bans: loadBans, security: loadSecurity, settings: loadSettings })[tab]().catch(e => {
+  ({ overview: loadOverview, files: loadFiles, shares: loadShares, logs: loadLogs, bans: loadBans, codes: loadCodes, security: loadSecurity, settings: loadSettings })[tab]().catch(e => {
     v.innerHTML = `<div class="glass section"><div class="empty"><div class="icon">⚠️</div>${esc(e.message === 'unauthorized' ? t('loadingErr') : e.message)}</div></div>`;
   });
 }
@@ -1475,6 +1584,274 @@ async function loadSecurity(){
     const r = await api('/api/admin/login-logs?mode=all', { method:'DELETE' });
     toast(t('secClearedN', {n: r.deleted})); loadSecurity();
   };
+}
+
+/* ═══════════ 激活码管理 ═══════════ */
+let codesPage = 1;
+let codesStatus = '';
+let codesBatchId = '';
+let codesPlan = '';
+let codesQ = '';
+
+async function loadCodes(){
+  const [usage, batches] = await Promise.all([
+    api('/api/admin/codes/usage'),
+    api('/api/admin/codes/batches').catch(() => ({batches: []})),
+  ]);
+  const sum = usage.summary || {};
+  const batchesList = usage.batches || [];
+  const batchOptions = (batches.batches || batchesList.map(b => ({batch_id: b.batch_id, count: b.n || b.count})));
+  const plans = [...new Set(batchOptions.map(b => b.batch_id))];
+
+  const totalCodes = sum.total || 0;
+  const usedCodes = (sum.active||0) + (sum.exhausted||0) + (sum.expired||0);
+  const totalTrafficGB = ((sum.total_bytes||0) / 1024 / 1024 / 1024).toFixed(2);
+  const usedTrafficGB = ((sum.used_bytes||0) / 1024 / 1024 / 1024).toFixed(2);
+  const trafficPct = sum.total_bytes > 0 ? Math.round((sum.used_bytes / sum.total_bytes) * 100) : 0;
+
+  const v = $('#view');
+  v.innerHTML = `
+    <div class="glass section">
+      <div class="section-title">
+        <h2>🎟️ ${esc(t('codesTitle'))}</h2>
+      </div>
+      <div class="sub" style="color:var(--text-2);font-size:13px;margin-bottom:14px">${esc(t('codesSub'))}</div>
+
+      <!-- 用量概览 -->
+      <div class="stats-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px">
+        <div class="stat-box" style="background:rgba(255,255,255,.06);border-radius:14px;padding:14px;border:1px solid var(--stroke)">
+          <div style="color:var(--text-3);font-size:12px">${esc(t('codesColCode'))} / Total</div>
+          <div style="font-size:22px;font-weight:700;margin-top:4px">${totalCodes}</div>
+        </div>
+        <div class="stat-box" style="background:rgba(255,255,255,.06);border-radius:14px;padding:14px;border:1px solid var(--stroke)">
+          <div style="color:var(--text-3);font-size:12px">${esc(t('codesStatusUnused'))}</div>
+          <div style="font-size:22px;font-weight:700;margin-top:4px;color:#34d399">${sum.unused||0}</div>
+        </div>
+        <div class="stat-box" style="background:rgba(255,255,255,.06);border-radius:14px;padding:14px;border:1px solid var(--stroke)">
+          <div style="color:var(--text-3);font-size:12px">${esc(t('codesStatusActive'))}</div>
+          <div style="font-size:22px;font-weight:700;margin-top:4px;color:#60a5fa">${sum.active||0}</div>
+        </div>
+        <div class="stat-box" style="background:rgba(255,255,255,.06);border-radius:14px;padding:14px;border:1px solid var(--stroke)">
+          <div style="color:var(--text-3);font-size:12px">${esc(t('codesColTraffic'))}</div>
+          <div style="font-size:18px;font-weight:700;margin-top:4px">${usedTrafficGB} / ${totalTrafficGB} GB</div>
+          <div style="margin-top:6px;height:4px;background:rgba(255,255,255,.15);border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${trafficPct}%;background:linear-gradient(90deg,#34d399,#60a5fa);border-radius:2px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 批量生成 -->
+    <div class="glass section">
+      <div class="section-title">
+        <h2>⚡ ${esc(t('codesGenerateTitle'))}</h2>
+      </div>
+      <div id="codes-gen-form" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
+        <div class="field" style="margin:0">
+          <label>${esc(t('codesCount'))}</label>
+          <input type="number" id="cg-count" min="1" max="10000" value="100">
+        </div>
+        <div class="field" style="margin:0">
+          <label>${esc(t('codesTraffic'))}</label>
+          <input type="number" id="cg-traffic" min="0" value="10">
+        </div>
+        <div class="field" style="margin:0">
+          <label>${esc(t('codesDays'))}</label>
+          <input type="number" id="cg-days" min="0" value="30">
+        </div>
+        <div class="field" style="margin:0">
+          <label>${esc(t('codesPlanName'))}</label>
+          <input type="text" id="cg-plan" placeholder="Pro / Basic / ...">
+        </div>
+        <div class="field" style="margin:0">
+          <label>${esc(t('codesNotes'))}</label>
+          <input type="text" id="cg-notes" placeholder="">
+        </div>
+        <div class="field" style="margin:0">
+          <label>${esc(t('codesQuotaMsg'))}</label>
+          <input type="text" id="cg-msg" placeholder="">
+        </div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn primary" id="cg-do">${esc(t('codesGenerate'))}</button>
+      </div>
+      <div id="cg-preview" style="margin-top:14px"></div>
+    </div>
+
+    <!-- 列表 -->
+    <div class="glass section">
+      <div class="section-title">
+        <h2>📋 ${esc(t('codesListTitle'))} <span id="codes-total-count" style="color:var(--text-3);font-weight:400;font-size:13px"></span></h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <select id="cf-status" style="padding:8px 12px;border-radius:10px;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);color:#fff;font-size:13px;font-family:inherit;outline:none">
+            <option value="">${esc(t('codesFilterAll'))} ${esc(t('codesFilterStatus'))}</option>
+            <option value="unused">${esc(t('codesStatusUnused'))}</option>
+            <option value="active">${esc(t('codesStatusActive'))}</option>
+            <option value="expired">${esc(t('codesStatusExpired'))}</option>
+            <option value="exhausted">${esc(t('codesStatusExhausted'))}</option>
+            <option value="revoked">${esc(t('codesStatusRevoked'))}</option>
+          </select>
+          <select id="cf-batch" style="padding:8px 12px;border-radius:10px;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);color:#fff;font-size:13px;font-family:inherit;outline:none">
+            <option value="">${esc(t('codesFilterAll'))} ${esc(t('codesFilterBatch'))}</option>
+            ${batchOptions.map(b => `<option value="${esc(b.batch_id)}">${esc(b.batch_id)} (${b.count||b.n||0})</option>`).join('')}
+          </select>
+          <input type="text" id="cf-q" placeholder="${esc(t('codesFilterQ'))}" value="${esc(codesQ)}" style="padding:8px 12px;border-radius:10px;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);color:#fff;font-size:13px;font-family:inherit;outline:none;width:180px">
+          <button class="btn sm" id="cf-export">${esc(t('codesExportCsv'))}</button>
+          <button class="btn sm danger" id="cf-revoke-batch">${esc(t('codesRevokeBatch'))}</button>
+        </div>
+      </div>
+      <div id="codes-table"></div>
+      <div id="codes-pg" style="margin-top:14px;display:flex;justify-content:center;gap:10px"></div>
+    </div>
+  `;
+
+  // 生成按钮
+  $('#cg-do').onclick = async () => {
+    const count = Math.max(1, Math.min(10000, Number($('#cg-count').value) || 100));
+    const traffic = Math.max(0, Number($('#cg-traffic').value) || 0);
+    const days = Math.max(0, Number($('#cg-days').value) || 0);
+    if (traffic === 0 && days === 0) { toast('Set at least traffic OR days', 'err'); return; }
+    try {
+      const r = await api('/api/admin/codes/generate', { method:'POST', body: JSON.stringify({
+        count, traffic_bytes: traffic * 1024 * 1024 * 1024, days_valid: days,
+        plan_name: $('#cg-plan').value.trim() || undefined,
+        quota_message: $('#cg-msg').value.trim() || undefined,
+        notes: $('#cg-notes').value.trim() || undefined,
+      })});
+      toast(t('codesGeneratedN', {n: r.count}));
+      const preview = r.codes || [];
+      $('#cg-preview').innerHTML = `
+        <div style="color:var(--text-3);font-size:12px;margin-bottom:6px">${esc(t('codesGeneratedPreview'))}</div>
+        <div style="background:rgba(0,0,0,.3);border-radius:12px;padding:12px;font-family:ui-monospace,'SF Mono',monospace;font-size:12px;color:#fde68a;line-height:1.7;max-height:200px;overflow:auto">
+          ${preview.map(c => `<div>${esc(c)}</div>`).join('')}
+        </div>
+      `;
+      codesPage = 1;
+      loadCodesList();
+    } catch(err) { toast(err.message, 'err'); }
+  };
+
+  // 过滤器
+  $('#cf-status').onchange = () => { codesStatus = $('#cf-status').value; codesPage = 1; loadCodesList(); };
+  $('#cf-batch').onchange = () => { codesBatchId = $('#cf-batch').value; codesPage = 1; loadCodesList(); };
+  $('#cf-q').addEventListener('input', (e) => {
+    clearTimeout(window.__codesQ_t);
+    window.__codesQ_t = setTimeout(() => { codesQ = e.target.value.trim(); codesPage = 1; loadCodesList(); }, 300);
+  });
+
+  // CSV 导出
+  $('#cf-export').onclick = () => {
+    const sp = new URLSearchParams();
+    sp.set('export', '1');
+    if (codesStatus) sp.set('status', codesStatus);
+    if (codesBatchId) sp.set('batch_id', codesBatchId);
+    if (codesQ) sp.set('q', codesQ);
+    location.href = '/api/admin/codes?' + sp.toString();
+  };
+
+  // 按批次作废
+  $('#cf-revoke-batch').onclick = async () => {
+    if (!codesBatchId) { toast('Select a batch first', 'err'); return; }
+    if (!(await confirmDialog(t('codesConfirmRevokeT'), t('codesConfirmRevokeD') + ' Batch: ' + codesBatchId, true))) return;
+    try {
+      const r = await api('/api/admin/codes/batch-revoke', { method:'POST', body: JSON.stringify({ batch_id: codesBatchId }) });
+      toast(t('codesBatchRevokeOk', {n: r.updated || r.count || 0}));
+      loadCodes();
+    } catch(err) { toast(err.message, 'err'); }
+  };
+
+  loadCodesList();
+}
+
+async function loadCodesList(){
+  const params = new URLSearchParams();
+  params.set('page', codesPage);
+  params.set('size', 50);
+  if (codesStatus) params.set('status', codesStatus);
+  if (codesBatchId) params.set('batch_id', codesBatchId);
+  if (codesPlan) params.set('plan', codesPlan);
+  if (codesQ) params.set('q', codesQ);
+  try {
+    const d = await api('/api/admin/codes?' + params.toString());
+    $('#codes-total-count').textContent = `(${d.total})`;
+    if (!d.rows || !d.rows.length) {
+      $('#codes-table').innerHTML = `<div class="empty"><div class="icon">🎟️</div>${esc(t('codesNoCodes'))}</div>`;
+      $('#codes-pg').innerHTML = '';
+      return;
+    }
+    const statusLabel = { unused: t('codesStatusUnused'), active: t('codesStatusActive'), expired: t('codesStatusExpired'), exhausted: t('codesStatusExhausted'), revoked: t('codesStatusRevoked') };
+    const statusColor = { unused: '#9aa4b2', active: '#60a5fa', expired: '#fbbf24', exhausted: '#f87171', revoked: '#a3a3a3' };
+    $('#codes-table').innerHTML = `
+      <div style="overflow-x:auto">
+      <table class="admin-table" style="width:100%;border-collapse:separate;border-spacing:0;font-size:13px">
+        <thead>
+          <tr style="text-align:left;color:var(--text-2);border-bottom:1px solid var(--stroke)">
+            <th style="padding:10px 8px">${esc(t('codesColCode'))}</th>
+            <th style="padding:10px 8px">${esc(t('codesColPlan'))}</th>
+            <th style="padding:10px 8px">${esc(t('codesColBatch'))}</th>
+            <th style="padding:10px 8px">${esc(t('codesColTraffic'))}</th>
+            <th style="padding:10px 8px">${esc(t('codesColStatus'))}</th>
+            <th style="padding:10px 8px">${esc(t('codesColActivated'))}</th>
+            <th style="padding:10px 8px">${esc(t('codesColActions'))}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${d.rows.map(r => {
+            const trafficGB = r.traffic_bytes > 0 ? (r.traffic_bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB' : (r.days_valid > 0 ? t('codesUnlimited') : t('codesRemainingInfinite'));
+            const usedGB = r.used_bytes > 0 ? (r.used_bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB' : '0';
+            const pct = r.pct || 0;
+            return `<tr style="border-bottom:1px solid rgba(255,255,255,.06)">
+              <td style="padding:10px 8px;font-family:ui-monospace,'SF Mono',monospace;color:#fde68a">${esc(r.code)}</td>
+              <td style="padding:10px 8px;color:var(--text-2)">${esc(r.plan_id||'—')}</td>
+              <td style="padding:10px 8px;color:var(--text-2)">${esc(r.batch_id||'—')}</td>
+              <td style="padding:10px 8px">
+                <div>${usedGB} / ${trafficGB}</div>
+                ${r.traffic_bytes > 0 ? `<div style="margin-top:4px;height:3px;background:rgba(255,255,255,.15);border-radius:2px;overflow:hidden"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#34d399,#60a5fa);border-radius:2px"></div></div>` : ''}
+              </td>
+              <td style="padding:10px 8px"><span style="color:${statusColor[r.status]||'#fff'}">${esc(statusLabel[r.status]||r.status)}</span></td>
+              <td style="padding:10px 8px;color:var(--text-2)">${fmtTime(r.activated_at)}</td>
+              <td style="padding:10px 8px">
+                <button class="btn sm" data-query="${esc(r.code)}">${esc(t('codesQueryRemainBtn'))}</button>
+                ${r.status !== 'revoked' ? `<button class="btn sm danger" data-revoke="${esc(r.id)}">${esc(t('codesRevokeOne'))}</button>` : ''}
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      </div>
+    `;
+
+    // 行事件
+    $$('#codes-table [data-revoke]').forEach(btn => btn.onclick = async () => {
+      if (!(await confirmDialog(t('codesConfirmRevokeT'), t('codesConfirmRevokeD'), true))) return;
+      try {
+        await api('/api/admin/codes/' + btn.dataset.revoke + '/revoke', { method:'POST' });
+        toast('OK');
+        loadCodesList();
+      } catch(err) { toast(err.message, 'err'); }
+    });
+    $$('#codes-table [data-query]').forEach(btn => btn.onclick = async () => {
+      try {
+        const r = await fetch('/api/codes/status?code=' + encodeURIComponent(btn.dataset.query));
+        const d = await r.json();
+        if (!r.ok) { toast(d.message || t('codesQueryNotFound'), 'err'); return; }
+        const rem = d.status.remaining;
+        const total = d.status.total;
+        if (rem === -1) toast(t('codesQueryResultInfinite'));
+        else toast(t('codesQueryResult', { remaining: fmtSize(rem), total: total > 0 ? fmtSize(total) : '∞' }));
+      } catch(err) { toast(err.message, 'err'); }
+    });
+
+    // 分页
+    const pages = Math.ceil(d.total / d.page_size);
+    $('#codes-pg').innerHTML = pages > 1 ? `
+      <button class="btn sm" ${d.page<=1?'disabled':''} id="pg-prev">${esc(t('prev'))}</button>
+      <span style="font-size:13px;color:var(--text-2);align-self:center">${esc(t('pageOf', {a: d.page, b: pages}))}</span>
+      <button class="btn sm" ${d.page>=pages?'disabled':''} id="pg-next">${esc(t('next'))}</button>
+    ` : '';
+    $('#pg-prev')?.addEventListener('click', () => { codesPage--; loadCodesList(); });
+    $('#pg-next')?.addEventListener('click', () => { codesPage++; loadCodesList(); });
+  } catch(err) { toast(err.message, 'err'); }
 }
 
 /* ═══════════ 设置 ═══════════ */

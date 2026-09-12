@@ -107,6 +107,36 @@ const SCHEMA_STATEMENTS: string[] = [
     updated_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_oauth_providers_enabled ON oauth_providers(enabled)`,
+  // ═══════════ 激活码 ═══════════
+  // 每个激活码独立额度，和全局 traffic_limit_bytes 互不影响
+  `CREATE TABLE IF NOT EXISTS activation_plans (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    traffic_bytes INTEGER NOT NULL DEFAULT 0,
+    days_valid INTEGER NOT NULL DEFAULT 0,
+    quota_message TEXT,
+    batch_id TEXT,
+    notes TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS activation_codes (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    plan_id TEXT,
+    traffic_bytes INTEGER NOT NULL DEFAULT 0,
+    used_bytes INTEGER NOT NULL DEFAULT 0,
+    days_valid INTEGER NOT NULL DEFAULT 0,
+    quota_message TEXT,
+    status TEXT NOT NULL DEFAULT 'unused',
+    batch_id TEXT,
+    notes TEXT,
+    created_at INTEGER NOT NULL,
+    activated_at INTEGER,
+    expires_at INTEGER
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_codes_status ON activation_codes(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_codes_batch ON activation_codes(batch_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_codes_code ON activation_codes(code)`,
 ];
 
 let schemaReady = false;
@@ -157,11 +187,9 @@ export async function ensureSchema(env: Env): Promise<void> {
       /* 列已存在，忽略 */
     }
     // 迁移：自定义下载文件名
-    try {
-      await env.db.prepare("ALTER TABLE shares ADD COLUMN download_name TEXT").run();
-    } catch {
-      /* 列已存在，忽略 */
-    }
+    try { await env.db.prepare("ALTER TABLE shares ADD COLUMN download_name TEXT").run(); } catch {}
+    // 迁移：download_logs 加 activation_code 列（记录哪条激活码消耗了流量）
+    try { await env.db.prepare("ALTER TABLE download_logs ADD COLUMN activation_code TEXT").run(); } catch {}
   } catch {
     // 竞态兜底：可能另一个 Isolate 刚建完表。
     // 再检测一次，确认表存在就算成功

@@ -194,6 +194,15 @@ const I18N = {
     oauthErrMsg: 'OAuth 登录过程中出错了，请重试或换一个方式下载。',
     oauthRetry: '重试',
     oauthSkip: '跳过登录（可能被拒绝）',
+    // 激活码
+    codeLabel: '🎟️ 激活码（可选）',
+    codePlaceholder: '输入 R2PAN-XXXX-XXXX-XXXX',
+    codeHint: '使用激活码下载可绕过月度流量限额，享独立额度',
+    codeCheck: '查询剩余额度',
+    codeCheckOk: '剩余 {remaining} / 总 {total}',
+    codeCheckInfinite: '剩余 ∞ (无限额度)',
+    codeCheckBad: '查询失败：{msg}',
+    codeRemove: '移除激活码',
   },
   en: {
     pageTitle: 'Share · {site}',
@@ -230,6 +239,15 @@ const I18N = {
     oauthErrMsg: 'Something went wrong during OAuth login. Please retry.',
     oauthRetry: 'Retry',
     oauthSkip: 'Skip login (may be denied)',
+    // Activation Codes
+    codeLabel: '🎟️ Activation Code (optional)',
+    codePlaceholder: 'Enter R2PAN-XXXX-XXXX-XXXX',
+    codeHint: 'Using an activation code bypasses the monthly traffic quota with its own independent limit',
+    codeCheck: 'Check Remaining',
+    codeCheckOk: 'Remaining {remaining} / Total {total}',
+    codeCheckInfinite: 'Remaining ∞ (unlimited)',
+    codeCheckBad: 'Check failed: {msg}',
+    codeRemove: 'Remove code',
   }
 };
 
@@ -460,6 +478,19 @@ function render(d, siteName, oauthErr, oauthProviders){
       <div id="ts-container" style="margin-top:6px">${esc(t('turnstileLoading'))}</div>
     ` : ''}
 
+    <!-- 激活码输入框（在密码框和下载按钮之前） -->
+    <div id="code-box" style="margin-top:18px;display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:12.5px;color:rgba(255,255,255,.55)">${esc(t('codeLabel'))}</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="activation-code" placeholder="${esc(t('codePlaceholder'))}"
+          style="flex:1;min-width:200px;padding:12px 16px;border-radius:14px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:14px;font-family:ui-monospace,'SF Mono',monospace;letter-spacing:.05em;outline:none"
+          oninput="this.value=this.value.toUpperCase()">
+        <button id="code-check" style="padding:10px 14px;border-radius:12px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:13px;cursor:pointer">${esc(t('codeCheck'))}</button>
+        <button id="code-remove" style="display:none;padding:10px 14px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.6);font-size:12px;cursor:pointer">${esc(t('codeRemove'))}</button>
+      </div>
+      <div id="code-status" style="font-size:12px;color:rgba(255,255,255,.45);min-height:16px"></div>
+    </div>
+
     ${d.needs_password && !d.quota_exceeded ? `
       <div class="pw" id="pw-box">
         <div class="pw-hint">${esc(t('protected'))}</div>
@@ -503,6 +534,67 @@ function render(d, siteName, oauthErr, oauthProviders){
 
   if(d.needs_password && $('#pw')) wireUnlock(d, ts, tsEnabled, tsOnDownload, oauthEnabled, oauthAuthed, oauthProviders);
 
+  // 激活码输入框事件绑定
+  const codeInput = $('#activation-code');
+  const codeCheckBtn = $('#code-check');
+  const codeRemoveBtn = $('#code-remove');
+  const codeStatus = $('#code-status');
+
+  // 自动从 localStorage 恢复上次输入的激活码
+  try {
+    const saved = localStorage.getItem('r2pan_code');
+    if(saved && codeInput){ codeInput.value = saved.toUpperCase(); if(codeRemoveBtn) codeRemoveBtn.style.display='inline-block'; }
+  } catch {}
+
+  if(codeInput){
+    codeInput.addEventListener('input', () => {
+      codeStatus.textContent = '';
+      codeRemoveBtn.style.display = codeInput.value.trim() ? 'inline-block' : 'none';
+    });
+    codeInput.addEventListener('keydown', e => {
+      if(e.key === 'Enter') { e.preventDefault(); codeCheckBtn?.click(); }
+    });
+    codeInput.addEventListener('change', () => {
+      try { if(codeInput.value.trim()) localStorage.setItem('r2pan_code', codeInput.value.trim().toUpperCase()); else localStorage.removeItem('r2pan_code'); } catch {}
+    });
+  }
+  if(codeRemoveBtn){
+    codeRemoveBtn.addEventListener('click', () => {
+      if(codeInput) { codeInput.value = ''; codeInput.focus(); }
+      codeRemoveBtn.style.display = 'none';
+      codeStatus.textContent = '';
+      try { localStorage.removeItem('r2pan_code'); } catch {}
+    });
+  }
+  if(codeCheckBtn){
+    codeCheckBtn.addEventListener('click', async () => {
+      const code = (codeInput?.value || '').trim().toUpperCase();
+      if(!code) { codeStatus.textContent = t('codeCheckBad', {msg: 'code empty'}); return; }
+      codeStatus.textContent = '...';
+      try {
+        const r = await fetch('/api/codes/status?code=' + encodeURIComponent(code));
+        const d = await r.json();
+        if(r.ok){
+          const st = d.status || {};
+          const rem = st.remaining;
+          if(rem === -1) codeStatus.textContent = t('codeCheckInfinite');
+          else {
+            const fmt = n => { n = Number(n)||0; if(n<1024) return n+' B'; const u=['KB','MB','GB','TB']; let i=-1; do{n/=1024;i++;}while(n>=1024&&i<u.length-1); return n.toFixed(n>=100?0:n>=10?1:2)+' '+u[i]; };
+            codeStatus.textContent = t('codeCheckOk', { remaining: fmt(rem), total: st.total>0?fmt(st.total):'∞' });
+          }
+          if(!d.usable && d.reason){ codeStatus.textContent += ' · ' + (d.message || d.reason); codeStatus.style.color = '#fbbf24'; }
+          else codeStatus.style.color = '';
+        } else {
+          codeStatus.textContent = t('codeCheckBad', {msg: d.message||'not found'});
+          codeStatus.style.color = '#f87171';
+        }
+      } catch(err){
+        codeStatus.textContent = t('codeCheckBad', {msg: err.message});
+        codeStatus.style.color = '#f87171';
+      }
+    });
+  }
+
   // 如果 on_share 模式需要弹 Turnstile，现在就开始渲染
   if(needTsNow && tsOnShare && ts.sitekey){
     const box = $('#ts-container');
@@ -515,6 +607,9 @@ function render(d, siteName, oauthErr, oauthProviders){
 
 async function triggerDownload(d, ts, tsEnabled, tsOnDownload){
   const baseUrl = `/s/${token}/download`;
+  // 读取激活码
+  const codeEl = $('#activation-code');
+  const code = (codeEl?.value || '').trim().toUpperCase();
   // both / on_download 模式：先确保有 token
   if(tsEnabled && tsOnDownload){
     let tk = window.__tsToken;
@@ -529,9 +624,13 @@ async function triggerDownload(d, ts, tsEnabled, tsOnDownload){
         box.remove();
       }catch{ box.remove(); return; }
     }
-    location.href = `${baseUrl}?cf=${tk}`;
+    let url = `${baseUrl}?cf=${tk}`;
+    if(code) url += `&code=${encodeURIComponent(code)}`;
+    location.href = url;
   } else {
-    location.href = baseUrl;
+    let url = baseUrl;
+    if(code) url += `?code=${encodeURIComponent(code)}`;
+    location.href = url;
   }
 }
 
@@ -540,6 +639,8 @@ async function wireUnlock(d, ts, tsEnabled, tsOnDownload){
   const unlock = async () => {
     const pass = input.value;
     if(!pass) return;
+    // 读取激活码
+    const code = ($('#activation-code')?.value || '').trim().toUpperCase();
     btn.style.pointerEvents = 'none'; btn.style.opacity = '.6';
     err.textContent = '';
     // both 模式：需要 Turnstile token
@@ -577,9 +678,13 @@ async function wireUnlock(d, ts, tsEnabled, tsOnDownload){
             box.innerHTML = `<div class="ts-passed">${esc(t('turnstilePass'))}</div>`;
           }
           const sep = res.url.includes('?') ? '&' : '?';
-          location.href = res.url + sep + 'cf=' + tk;
+          let dlUrl = res.url + sep + 'cf=' + tk;
+          if(code){ const s2 = dlUrl.includes('?') ? '&' : '?'; dlUrl += s2 + 'code=' + encodeURIComponent(code); }
+          location.href = dlUrl;
         } else {
-          location.href = res.url;
+          let dlUrl = res.url;
+          if(code){ const s2 = dlUrl.includes('?') ? '&' : '?'; dlUrl += s2 + 'code=' + encodeURIComponent(code); }
+          location.href = dlUrl;
         }
         return;
       }

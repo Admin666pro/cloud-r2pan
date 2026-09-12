@@ -2,6 +2,7 @@ import type { Env, ShareWithFile } from "./types";
 import { getSettings, addTraffic } from "./settings";
 import { parseUA } from "./ua";
 import { clientIp, isAdminWhitelisted } from "./auth";
+import { findCodeByString, checkCodeUsable, activateCodeIfNeeded, deductQuota, formatCodeStatus } from "./codes";
 import { errorPage } from "./pages";
 import { hmacHex, sha256Hex, randomHex, safeEqual, decryptSecret } from "./crypto";
 import { verifyOAuthSession } from "./oauth";
@@ -266,6 +267,35 @@ export async function handleDownload(
   const ip = clientIp(req);
   const ua = req.headers.get("user-agent") ?? "";
   const country = req.headers.get("cf-ipcountry") ?? "";
+  const settings = await getSettings(env);
+
+  // ══ 解析激活码 ══
+  // 支持两种形式：URL 参数 ?code=XXX 或查询串中带 code=（cookie/localStorage 同步过来）
+  const urlCode = new URL(req.url).searchParams.get("code");
+  const headerCode = req.headers.get("x-activation-code");
+  const activationCode = (urlCode || headerCode || "").trim().toUpperCase() || null;
+  let codeRow: Awaited<ReturnType<typeof findCodeByString>> = null;
+  if (activationCode) {
+    codeRow = await findCodeByString(env, activationCode);
+    const check = checkCodeUsable(codeRow as any);
+    if (!check.ok) {
+      // 激活码不可用 → 自定义文案错误页（但不影响其他免费下载！）
+      const reason = check.reason;
+      let title = "激活码不可用";
+      if (reason === "exhausted") title = "激活码流量已耗尽";
+      if (reason === "expired") title = "激活码已过期";
+      if (reason === "revoked") title = "激活码已作废";
+      return errorPage(
+        req,
+        403,
+        { zh: title, en: "Activation Code Unavailable" },
+        { zh: check.message || reason || "该激活码不可用", en: check.message || "This activation code is not available" },
+        { siteTitle: settings.siteTitle }
+      );
+    }
+    // 码可用 → 首次使用时置为 active
+    await activateCodeIfNeeded(env, codeRow!);
+  }
 
   // 1. 封禁检查（过期自动解封）
   const ban = await env.db.prepare(
@@ -364,8 +394,6 @@ export async function handleDownload(
     );
   }
 
-  const settings = await getSettings(env);
-
   // 2.6 OAuth2 下载鉴权
   if (settings.oauthEnabled) {
     const oauthResult = await verifyOAuthSession(env, req.headers.get("cookie"));
@@ -423,10 +451,11 @@ export async function handleDownload(
   }
 
   // 3. 流量限额：达到预设上限立即暂停所有下载（防止流量超额扣费）
-  //    白名单 IP 不受此限制
+  //    白名单 IP 和 使用激活码的下载不受此限制（激活码有独立额度）
   {
     const whitelisted = isAdminWhitelisted(ip, settings.adminIps);
-    if (!whitelisted && settings.trafficLimitBytes > 0 && settings.trafficUsedBytes >= settings.trafficLimitBytes) {
+    const usingCode = !!codeRow;
+    if (!whitelisted && !usingCode && settings.trafficLimitBytes > 0 && settings.trafficUsedBytes >= settings.trafficLimitBytes) {
       return errorPage(
         req,
         503,
@@ -521,18 +550,23 @@ export async function handleDownload(
     headers.set("content-range", `bytes ${range.offset}-${range.offset + servedLen - 1}/${row.size}`);
   }
 
-  // 6. 后台记录：下载日志 + 流量（计数已在主流程原子扣减完成）
+  // 6. 后台记录：下载日志 + 流量 + 激活码额度扣减
   const bytes = servedLen;
+  const codeId = codeRow ? codeRow.code : null;
   ctx.waitUntil(
     (async () => {
       const { browser, os } = parseUA(ua);
       await env.db.prepare(
-        `INSERT INTO download_logs(share_id, file_id, file_name, ip, ua, browser, os, country, bytes, created_at)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
+        `INSERT INTO download_logs(share_id, file_id, file_name, ip, ua, browser, os, country, bytes, created_at, activation_code)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
       )
-        .bind(token, row.file_id, row.name, ip, ua.slice(0, 500), browser, os, country, bytes, Date.now())
+        .bind(token, row.file_id, row.name, ip, ua.slice(0, 500), browser, os, country, bytes, Date.now(), codeId)
         .run();
       await addTraffic(env, bytes);
+      // 激活码额度扣减（如果这次下载用了码）
+      if (codeRow) {
+        await deductQuota(env, codeRow, bytes);
+      }
     })()
   );
 
