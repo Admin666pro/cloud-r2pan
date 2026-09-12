@@ -57,6 +57,14 @@ export interface Settings {
   oauthCustomUserinfoUrl: string;
   /** 自定义 Provider: token 返回字段名 */
   oauthCustomTokenField: string;
+
+  // ═══════ 管理员 IP 白名单 ═══════
+  /**
+   * 允许访问 /admin 和 /api/admin 的 IP 列表（CIDR 或精确 IP，逗号分隔）。
+   * 为空 = 不限制；非空 = 仅这些 IP 能访问管理员接口。
+   * 这些 IP 的下载流量不受 trafficLimitBytes 限额约束。
+   */
+  adminIps: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -85,6 +93,7 @@ export const DEFAULT_SETTINGS: Settings = {
   oauthCustomTokenUrl: "",
   oauthCustomUserinfoUrl: "",
   oauthCustomTokenField: "access_token",
+  adminIps: "",
 };
 
 function toInt(v: unknown, fallback: number): number {
@@ -138,6 +147,7 @@ export async function getSettings(env: Env): Promise<Settings> {
     oauthCustomTokenUrl: map.get("oauth_custom_token_url") ?? "",
     oauthCustomUserinfoUrl: map.get("oauth_custom_userinfo_url") ?? "",
     oauthCustomTokenField: map.get("oauth_custom_token_field") ?? DEFAULT_SETTINGS.oauthCustomTokenField,
+    adminIps: map.get("admin_ips") ?? "",
   };
 }
 

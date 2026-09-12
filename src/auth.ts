@@ -86,3 +86,56 @@ export function clientIp(req: Request): string {
     "127.0.0.1"
   );
 }
+
+/** IPv4 字符串 → 32 位无符号整数 */
+function ipv4ToInt(ip: string): number | null {
+  const parts = ip.split(".").map((p) => parseInt(p, 10));
+  if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) return null;
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+}
+
+/** 判断一个 IP 是否匹配白名单中的某一项（支持精确 IP、CIDR、通配符 *） */
+export function ipMatchesList(ip: string, listStr: string): boolean {
+  if (!listStr) return false;
+  const entries = listStr
+    .split(/[,，\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (entries.length === 0) return false;
+
+  for (const entry of entries) {
+    // 精确匹配
+    if (entry === ip) return true;
+
+    // CIDR 匹配（仅 IPv4）
+    const cidr = entry.match(/^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/);
+    if (cidr) {
+      const network = ipv4ToInt(cidr[1]);
+      const bits = parseInt(cidr[2], 10);
+      const target = ipv4ToInt(ip);
+      if (network !== null && target !== null && bits >= 0 && bits <= 32) {
+        const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+        if ((network & mask) === (target & mask)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** 白名单启用判定：adminIps 为空 → 不限制；非空 → 仅匹配的 IP 算白名单内 */
+export function isAdminWhitelisted(ip: string, adminIps: string): boolean {
+  if (!adminIps) return false; // 未配置就不标记为白名单内，保持原有限额
+  return ipMatchesList(ip, adminIps);
+}
+
+/**
+ * 管理员入口 IP 门禁：
+ *   - adminIps 为空 → 所有人可以访问（保持向后兼容）
+ *   - adminIps 非空 → 仅匹配白名单的 IP 可以访问，其他返回 403
+ */
+export function requireAdminIp(ip: string, adminIps: string): Response | null {
+  if (!adminIps) return null;
+  if (ipMatchesList(ip, adminIps)) return null;
+  const body = JSON.stringify({ error: "ip_forbidden", message: "This IP is not allowed to access the admin panel." });
+  return new Response(body, { status: 403, headers: { "content-type": "application/json" } });
+}

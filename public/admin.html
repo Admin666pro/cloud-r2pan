@@ -351,6 +351,8 @@ const I18N = {
     validity: '有效期', perm: '永久有效', h1: '1 小时', d1: '1 天', d7: '7 天', d30: '30 天',
     sharePassword: '访问密码（可选）', sharePasswordPh: '留空则无需密码',
     sharePasswordHint: '设置后，访客需输入密码才能下载。',
+    downloadName: '下载时显示名（可选）', downloadNamePh: '留空则用原始文件名',
+    downloadNameHint: '访客下载时看到的文件名，隐藏真实路径中的敏感信息。',
     maxDownloadsLabel: '下载次数上限（留空或 0 = 不限）', unlimitedPlaceholder: '不限',
     maxTip: '达到上限后链接自动失效。单 IP 重复下载限制由「设置」统一控制。',
     generate: '生成链接', shareCreated: '分享链接已创建 ✨', shareCreatedSub: '复制下面的链接发给需要的人',
@@ -422,6 +424,13 @@ const I18N = {
     login2faRecoveryPh: '16 位恢复码（空格可选）',
     login2faRecoveryHint: '如果 Authenticator 丢失，可以输入恢复码登录并自动关闭 2FA',
     login2faRecoveryOk: '恢复码验证成功，2FA 已自动重置',
+    // 管理员 IP 白名单
+    ipWhitelist: '管理员 IP 白名单',
+    ipWhitelistD: '限制哪些 IP 可以访问 /admin 后台。留空 = 不限制；配置后，只有白名单 IP 能登录，且这些 IP 的下载不受流量限额约束。',
+    ipWhitelistPh: '每行一个，或用逗号分隔。支持精确 IP（1.2.3.4）和 CIDR（10.0.0.0/8）',
+    ipWhitelistOn: '已启用',
+    ipWhitelistOff: '未启用（任何 IP 都能访问 /admin）',
+    ipWhitelistHint: '格式：每行一个条目 或 用逗号分隔。例：192.168.1.1, 10.0.0.0/8, 203.0.113.0/24',
     // 2FA 设置
     twofa: '两步验证 (TOTP)',
     twofaD: '使用 Google Authenticator / Microsoft Authenticator 等应用生成验证码',
@@ -548,6 +557,8 @@ const I18N = {
     validity: 'Validity', perm: 'Forever', h1: '1 hour', d1: '1 day', d7: '7 days', d30: '30 days',
     sharePassword: 'Access password (optional)', sharePasswordPh: 'Leave blank for no password',
     sharePasswordHint: 'When set, visitors must enter a password to download.',
+    downloadName: 'Display name on download (optional)', downloadNamePh: 'Leave blank to use original filename',
+    downloadNameHint: 'The filename visitors see when they download. Useful for hiding sensitive info in original paths.',
     maxDownloadsLabel: 'Max downloads (empty or 0 = unlimited)', unlimitedPlaceholder: 'Unlimited',
     maxTip: 'The link expires when the cap is reached. Per-IP duplicate limits are controlled in Settings.',
     generate: 'Generate Link', shareCreated: 'Share link created ✨', shareCreatedSub: 'Copy the link below and share it',
@@ -619,6 +630,13 @@ const I18N = {
     login2faRecoveryPh: '16-char recovery code (spaces optional)',
     login2faRecoveryHint: 'If your Authenticator is lost, enter a recovery code to log in and disable 2FA automatically.',
     login2faRecoveryOk: 'Recovery code accepted. 2FA has been reset.',
+    // Admin IP whitelist
+    ipWhitelist: 'Admin IP Whitelist',
+    ipWhitelistD: 'Restricts which IPs can access /admin. Empty = no restriction. When set, only whitelisted IPs can log in, and their downloads are exempt from traffic quota.',
+    ipWhitelistPh: 'One per line, or comma-separated. Supports exact IP (1.2.3.4) and CIDR (10.0.0.0/8)',
+    ipWhitelistOn: 'Enabled',
+    ipWhitelistOff: 'Not enabled (any IP can access /admin)',
+    ipWhitelistHint: 'Format: one per line OR comma-separated. e.g. 192.168.1.1, 10.0.0.0/8, 203.0.113.0/24',
     // 2FA settings
     twofa: 'Two-Factor Authentication (TOTP)',
     twofaD: 'Use Google Authenticator / Microsoft Authenticator to generate one-time codes',
@@ -1173,6 +1191,11 @@ function openShareModal(fileId){
       <div class="tip">${esc(t('sharePasswordHint'))}</div>
     </div>
     <div class="field">
+      <label>${esc(t('downloadName'))}</label>
+      <input type="text" id="sh-dlname" placeholder="${esc(t('downloadNamePh'))}">
+      <div class="tip">${esc(t('downloadNameHint'))}</div>
+    </div>
+    <div class="field">
       <label>${esc(t('maxDownloadsLabel'))}</label>
       <input type="number" id="sh-max" min="0" placeholder="${esc(t('unlimitedPlaceholder'))}">
       <div class="tip">${esc(t('maxTip'))}</div>
@@ -1186,8 +1209,9 @@ function openShareModal(fileId){
     const exp = Number($('#sh-exp').value) || null;
     const max = Number($('#sh-max').value) || null;
     const password = $('#sh-pwd').value.trim() || null;
+    const download_name = $('#sh-dlname').value.trim() || null;
     try{
-      const r = await api('/api/admin/shares', { method:'POST', body: JSON.stringify({ file_id: fileId, expires_hours: exp, max_downloads: max, password }) });
+      const r = await api('/api/admin/shares', { method:'POST', body: JSON.stringify({ file_id: fileId, expires_hours: exp, max_downloads: max, password, download_name }) });
       const url = location.origin + r.url;
       openModal(`
         <h3>${esc(t('shareCreated'))}</h3>
@@ -1222,7 +1246,7 @@ async function loadShares(){
           const pw = s.has_password ? (s.password_plain || '') : null;
           return `
           <tr>
-            <td class="name-cell">${ficon(s.file_name)} ${esc(s.file_name)}</td>
+            <td class="name-cell">${ficon(s.file_name)} ${esc(s.file_name)}${s.download_name && s.download_name !== s.file_name ? `<div style="font-size:11px;color:#6ee7b7;margin-top:2px">↳ ${esc(s.download_name)}</div>` : ''}</td>
             <td class="mono">${s.has_password?'🔒 ':''}<a href="/s/${s.id}" target="_blank" style="color:#a5d8ff;text-decoration:none">/s/${s.id}</a></td>
             <td class="mono">${pw ? `<span id="pw-${s.id}" style="font-family:ui-monospace,'SF Mono',monospace;color:#fde68a">••••••</span>
               <button class="btn sm" data-pw="${s.id}" data-val="${esc(pw)}" style="padding:2px 8px;font-size:11px;margin-left:4px">👁</button>
@@ -1505,6 +1529,17 @@ async function loadSettings(){
         </div>
       </div>
     </div>
+    <!-- IP 白名单 -->
+    <div class="glass group">
+      <div class="row" style="flex-direction:column;align-items:stretch;gap:10px">
+        <div class="info" style="margin-bottom:4px"><div class="t">🔒 ${esc(t('ipWhitelist'))}</div><div class="d">${esc(t('ipWhitelistD'))}</div></div>
+        <textarea id="st-adminips" rows="3" style="width:100%;padding:10px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace;resize:vertical" placeholder="${esc(t('ipWhitelistPh'))}">${esc(s.admin_ips ?? '')}</textarea>
+        <div class="tip" style="margin-top:4px">
+          ${s.admin_ips ? `<span style="color:#6ee7b7">${esc(t('ipWhitelistOn'))}</span>` : `<span style="color:#fde68a">${esc(t('ipWhitelistOff'))}</span>`}
+          ${esc(t('ipWhitelistHint'))}
+        </div>
+      </div>
+    </div>
     <!-- 2FA 组 -->
     <div class="glass group">
       <div class="row">
@@ -1619,6 +1654,7 @@ async function loadSettings(){
       auto_ban: $('#st-autoban').checked,
       ban_hours: Number($('#st-banhours').value) || 0,
       oauth_enabled: $('#oauth-enabled').checked,
+      admin_ips: $('#st-adminips').value.trim(),
     };
     await api('/api/admin/settings', { method:'PUT', body: JSON.stringify(body) });
     toast(t('saved'));

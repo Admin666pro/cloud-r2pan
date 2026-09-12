@@ -1,7 +1,7 @@
 import type { Env } from "./types";
 import { ensureSchema, randomId } from "./db";
 import { getSettings, updateSettings } from "./settings";
-import { checkAdminKey, createSession, verifySession, clientIp, rateLimitLogin } from "./auth";
+import { checkAdminKey, createSession, verifySession, clientIp, rateLimitLogin, requireAdminIp } from "./auth";
 import { pickLang } from "./i18n";
 import { hashPassword } from "./public";
 import { parseUA } from "./ua";
@@ -76,6 +76,13 @@ export async function handleAdminApi(
   await ensureSchema(env);
   const method = req.method;
   const url = new URL(req.url);
+
+  // ── IP 白名单门禁 ── 空 = 不限制；非空 = 仅白名单 IP 能访问所有 /api/admin/*
+  {
+    const s = await getSettings(env);
+    const denied = requireAdminIp(clientIp(req), s.adminIps);
+    if (denied) return denied;
+  }
 
   // ── 登录（支持 2FA 两阶段） ──────────────────────────────
   if (path === "/api/admin/login" && method === "POST") {
@@ -334,7 +341,7 @@ export async function handleAdminApi(
 
   // ── 创建分享 ──────────────────────────────────────
   if (path === "/api/admin/shares" && method === "POST") {
-    const body = await readJson<{ file_id: string; expires_hours: number | null; max_downloads: number | null; password: string | null }>(req);
+    const body = await readJson<{ file_id: string; expires_hours: number | null; max_downloads: number | null; password: string | null; download_name?: string | null }>(req);
     if (!body.file_id) return json({ error: msg(req, "缺少 file_id", "Missing file_id") }, 400);
     const file = await env.db.prepare("SELECT id FROM files WHERE id = ?1").bind(body.file_id).first();
     if (!file) return json({ error: msg(req, "文件不存在", "File not found") }, 404);
@@ -347,11 +354,13 @@ export async function handleAdminApi(
     const passwordHash = password ? await hashPassword(password) : null;
     // 可逆加密存储密码明文，管理员之后可查看
     const passwordCipher = password ? await encryptSecret(password, env.admin) : null;
+    const downloadName =
+      typeof body.download_name === "string" && body.download_name.trim() ? body.download_name.trim() : null;
     const id = randomId(10);
     await env.db.prepare(
-      "INSERT INTO shares(id, file_id, created_at, expires_at, max_downloads, password_hash, password_cipher) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+      "INSERT INTO shares(id, file_id, created_at, expires_at, max_downloads, password_hash, password_cipher, download_name) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
     )
-      .bind(id, body.file_id, Date.now(), expiresAt, maxDownloads, passwordHash, passwordCipher)
+      .bind(id, body.file_id, Date.now(), expiresAt, maxDownloads, passwordHash, passwordCipher, downloadName)
       .run();
     return json({ ok: true, id, url: `/s/${id}` }, 201);
   }
@@ -360,7 +369,7 @@ export async function handleAdminApi(
   if (path === "/api/admin/shares" && method === "GET") {
     const { results } = await env.db.prepare(
       `SELECT s.id, s.file_id, s.created_at, s.expires_at, s.max_downloads, s.download_count, s.revoked,
-              s.password_hash, s.password_cipher, f.name AS file_name, f.size AS file_size
+              s.password_hash, s.password_cipher, s.download_name, f.name AS file_name, f.size AS file_size
        FROM shares s JOIN files f ON f.id = s.file_id
        ORDER BY s.created_at DESC`
     ).all();
@@ -718,6 +727,8 @@ export async function handleAdminApi(
         secret_configured: true, // 列表里不暴露 secret 是否配，只在详情里展示
       })),
       oauth_has_enabled_providers: enabledProviders.length > 0,
+      // IP 白名单
+      admin_ips: s.adminIps,
     });
   }
 
@@ -763,6 +774,11 @@ export async function handleAdminApi(
     }
     // OAuth2 总开关（具体 provider 配置由 /api/admin/oauth/providers CRUD 管理）
     if (typeof body.oauth_enabled === "boolean") patch.oauth_enabled = body.oauth_enabled ? "1" : "0";
+
+    // 管理员 IP 白名单
+    if (typeof body.admin_ips === "string") {
+      patch.admin_ips = body.admin_ips.trim();
+    }
 
     await updateSettings(env, patch);
     return json({ ok: true });

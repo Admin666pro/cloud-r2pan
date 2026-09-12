@@ -1,7 +1,7 @@
 import type { Env, ShareWithFile } from "./types";
 import { getSettings, addTraffic } from "./settings";
 import { parseUA } from "./ua";
-import { clientIp } from "./auth";
+import { clientIp, isAdminWhitelisted } from "./auth";
 import { errorPage } from "./pages";
 import { hmacHex, sha256Hex, randomHex, safeEqual, decryptSecret } from "./crypto";
 import { verifyOAuthSession } from "./oauth";
@@ -151,15 +151,16 @@ export async function handleShareInfo(req: Request, env: Env, token: string): Pr
   const row = await getShare(env, token);
   if (!row) return Response.json({ error: "not_found" }, { status: 404 });
   const settings = await getSettings(env);
+  const ip = clientIp(req);
+  const isWhitelisted = isAdminWhitelisted(ip, settings.adminIps);
   const quotaExceeded =
-    settings.trafficLimitBytes > 0 && settings.trafficUsedBytes >= settings.trafficLimitBytes;
+    !isWhitelisted && settings.trafficLimitBytes > 0 && settings.trafficUsedBytes >= settings.trafficLimitBytes;
   let status: "ok" | "gone" | "expired" | "maxed" = "ok";
   if (row.revoked) status = "gone";
   else if (row.expires_at && row.expires_at < Date.now()) status = "expired";
   else if (row.max_downloads && row.download_count >= row.max_downloads) status = "maxed";
 
   // Turnstile：在 share 页面加载时统计一次访问，判断是否需要弹
-  const ip = clientIp(req);
   const enabled = await isTurnstileEnabled(env, settings);
   let needsTurnstile = false;
   let visitCount = 0;
@@ -214,7 +215,7 @@ export async function handleShareInfo(req: Request, env: Env, token: string): Pr
 async function getShare(env: Env, token: string): Promise<ShareWithFile | null> {
   return await env.db.prepare(
     `SELECT s.id, s.file_id, s.created_at, s.expires_at, s.max_downloads, s.download_count, s.revoked, s.password_hash,
-            f.key, f.name, f.size, f.mime
+            s.download_name, f.key, f.name, f.size, f.mime
      FROM shares s JOIN files f ON f.id = s.file_id
      WHERE s.id = ?1`
   )
@@ -422,17 +423,21 @@ export async function handleDownload(
   }
 
   // 3. 流量限额：达到预设上限立即暂停所有下载（防止流量超额扣费）
-  if (settings.trafficLimitBytes > 0 && settings.trafficUsedBytes >= settings.trafficLimitBytes) {
-    return errorPage(
-      req,
-      503,
-      { zh: "下载已暂停", en: "Downloads Paused" },
-      {
-        zh: "本月流量已达预设限额，为避免产生额外费用，下载服务已自动暂停。请联系管理员调整限额或重置流量。",
-        en: "The monthly traffic quota has been reached. To avoid extra charges, downloads are automatically paused. Please contact the administrator to raise the quota or reset traffic.",
-      },
-      { siteTitle: settings.siteTitle }
-    );
+  //    白名单 IP 不受此限制
+  {
+    const whitelisted = isAdminWhitelisted(ip, settings.adminIps);
+    if (!whitelisted && settings.trafficLimitBytes > 0 && settings.trafficUsedBytes >= settings.trafficLimitBytes) {
+      return errorPage(
+        req,
+        503,
+        { zh: "下载已暂停", en: "Downloads Paused" },
+        {
+          zh: "本月流量已达预设限额，为避免产生额外费用，下载服务已自动暂停。请联系管理员调整限额或重置流量。",
+          en: "The monthly traffic quota has been reached. To avoid extra charges, downloads are automatically paused. Please contact the administrator to raise the quota or reset traffic.",
+        },
+        { siteTitle: settings.siteTitle }
+      );
+    }
   }
 
   // 4. 单 IP 重复下载检查 + 自动封禁
@@ -504,9 +509,10 @@ export async function handleDownload(
   headers.set("etag", obj.httpEtag);
   headers.set("accept-ranges", "bytes");
   headers.set("cache-control", "no-store");
+  const displayName = (row as any).download_name || row.name;
   headers.set(
     "content-disposition",
-    `attachment; filename*=UTF-8''${encodeURIComponent(row.name)}`
+    `attachment; filename*=UTF-8''${encodeURIComponent(displayName)}`
   );
   // 注意: R2 分片读取后 obj.size 仍是整个对象的大小，实际分片长度需自行计算
   const servedLen = range ? range.length : row.size;

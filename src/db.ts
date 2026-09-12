@@ -156,6 +156,12 @@ export async function ensureSchema(env: Env): Promise<void> {
     } catch {
       /* 列已存在，忽略 */
     }
+    // 迁移：自定义下载文件名
+    try {
+      await env.db.prepare("ALTER TABLE shares ADD COLUMN download_name TEXT").run();
+    } catch {
+      /* 列已存在，忽略 */
+    }
   } catch {
     // 竞态兜底：可能另一个 Isolate 刚建完表。
     // 再检测一次，确认表存在就算成功
