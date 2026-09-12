@@ -1,33 +1,8 @@
 import type { Env } from "./types";
+import { hmacB64url, safeEqual } from "./crypto";
 
 const COOKIE_NAME = "cd_admin";
 const SESSION_TTL_MS = 7 * 24 * 3600 * 1000; // 7 天
-
-function b64url(bytes: Uint8Array): string {
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function hmac(secret: string, data: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
-  return b64url(new Uint8Array(sig));
-}
-
-/** 恒定时间字符串比较，防时序攻击 */
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return out === 0;
-}
 
 function getCookie(req: Request, name: string): string | null {
   const cookies = req.headers.get("cookie") ?? "";
@@ -41,7 +16,7 @@ function getCookie(req: Request, name: string): string | null {
 /** 登录成功后签发会话 Cookie（不加 Secure 以兼容本地 http 调试） */
 export async function createSession(env: Env): Promise<string> {
   const exp = Date.now() + SESSION_TTL_MS;
-  const sig = await hmac(env.admin, String(exp));
+  const sig = await hmacB64url(env.admin, String(exp));
   const token = `${exp}.${sig}`;
   return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_TTL_MS / 1000}`;
 }
@@ -55,15 +30,15 @@ export async function verifySession(req: Request, env: Env): Promise<boolean> {
   const exp = token.slice(0, dot);
   const sig = token.slice(dot + 1);
   if (!/^\d+$/.test(exp) || Number(exp) < Date.now()) return false;
-  const expect = await hmac(env.admin, exp);
+  const expect = await hmacB64url(env.admin, exp);
   return safeEqual(sig, expect);
 }
 
 /** 校验登录密钥（恒定时间比较） */
 export async function checkAdminKey(env: Env, input: string): Promise<boolean> {
   if (!env.admin) return false;
-  const a = await hmac(env.admin, input);
-  const b = await hmac(env.admin, env.admin);
+  const a = await hmacB64url(env.admin, input);
+  const b = await hmacB64url(env.admin, env.admin);
   return safeEqual(a, b);
 }
 

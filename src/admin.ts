@@ -92,14 +92,8 @@ export async function handleAdminApi(
 
   // ── 概览统计 ──────────────────────────────────────
   if (path === "/api/admin/stats" && method === "GET") {
+    // getSettings 内部已做跨月自动兜底，无需此处重复检查和 DB 写入
     const s = await getSettings(env);
-    const month = new Date().toISOString().slice(0, 7);
-    if (s.trafficMonth !== month && s.trafficUsedBytes > 0) {
-      // 跨月自动归零（首次请求时兜底）
-      await updateSettings(env, { traffic_used_bytes: "0", traffic_month: month });
-      s.trafficUsedBytes = 0;
-      s.trafficMonth = month;
-    }
     const [files, shares, activeShares, totalDownloads, todayStat, chartRows, recent, banned] =
       await Promise.all([
         env.db.prepare("SELECT COUNT(*) AS c FROM files").first<{ c: number }>(),
@@ -185,11 +179,20 @@ export async function handleAdminApi(
     const obj = await env.r2.put(key, req.body, {
       httpMetadata: { contentType: mime, contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(name)}` },
     });
-    await env.db.prepare(
-      "INSERT INTO files(id, key, name, size, mime, uploaded_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6)"
-    )
-      .bind(id, key, name, obj.size, mime, Date.now())
-      .run();
+    // ── Bug #4 修复：D1 写入失败时清理已写入的 R2 对象 ──
+    // R2 写入在 D1 之前，D1 一旦失败就会产生孤儿 R2 对象。
+    // 用 waitUntil 异步清理，让响应尽快返回给前端，不阻塞。
+    try {
+      await env.db.prepare(
+        "INSERT INTO files(id, key, name, size, mime, uploaded_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6)"
+      )
+        .bind(id, key, name, obj.size, mime, Date.now())
+        .run();
+    } catch (dbErr) {
+      ctx.waitUntil(env.r2.delete(key).catch(() => {}));
+      console.error("upload: D1 insert failed, cleaned up R2 object:", dbErr);
+      return json({ error: msg(req, "数据库写入失败，请重试", "Database write failed. Please retry.") }, 500);
+    }
     return json({ ok: true, id, name, size: obj.size }, 201);
   }
 

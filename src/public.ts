@@ -3,6 +3,7 @@ import { getSettings, addTraffic } from "./settings";
 import { parseUA } from "./ua";
 import { clientIp } from "./auth";
 import { errorPage } from "./pages";
+import { hmacHex, sha256Hex, randomHex, safeEqual } from "./crypto";
 
 /** 解析 Range 头 → {offset, length}，无效返回 null */
 function parseRange(header: string | null, size: number): { offset: number; length: number } | null {
@@ -45,7 +46,7 @@ async function verifyPassword(stored: string, password: string): Promise<boolean
 /** 颁发短时下载授权令牌：格式 `${到期时间戳}.${HMAC}` */
 async function issueToken(env: Env, token: string): Promise<string> {
   const exp = Date.now() + TOKEN_TTL_MS;
-  const sig = await hmac(env, `${token}:${exp}`);
+  const sig = await hmacHex(env.admin, `${token}:${exp}`);
   return `${exp}.${sig}`;
 }
 /** 校验下载授权令牌（存在于 URL query string 中） */
@@ -56,36 +57,11 @@ async function verifyShareToken(env: Env, token: string, query: string): Promise
   if (i < 0) return false;
   const exp = Number(t.slice(0, i));
   if (!Number.isFinite(exp) || exp < Date.now()) return false;
-  const want = await hmac(env, `${token}:${exp}`);
+  const want = await hmacHex(env.admin, `${token}:${exp}`);
   return safeEqual(t.slice(i + 1), want);
 }
 
 const TOKEN_TTL_MS = 24 * 3600_000; // 授权令牌有效期 24h
-function randomHex(n = 16): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(n));
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-async function sha256Hex(data: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-async function hmac(env: Env, msg: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(env.admin),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg));
-  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let k = 0; k < a.length; k++) diff |= a.charCodeAt(k) ^ b.charCodeAt(k);
-  return diff === 0;
-}
 
 /** GET /s/:token —— 分享页元信息（供前端渲染） */
 export async function handleShareInfo(req: Request, env: Env, token: string): Promise<Response> {
@@ -325,7 +301,7 @@ export async function handleDownload(
         ).bind(token, row.file_id, row.name, ip, ua.slice(0, 500), browser, os, country, bytes, Date.now()),
         env.db.prepare("UPDATE shares SET download_count = download_count + 1 WHERE id = ?1").bind(token),
       ]);
-      await addTraffic(env, settings, bytes);
+      await addTraffic(env, bytes);
     })()
   );
 
