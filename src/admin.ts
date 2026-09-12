@@ -65,7 +65,7 @@ export async function handleAdminApi(
     return new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json;charset=utf-8",
-        "set-cookie": await createSession(env),
+        "set-cookie": await createSession(env, url.protocol === "https:"),
         "cache-control": "no-store",
       },
     });
@@ -77,10 +77,11 @@ export async function handleAdminApi(
 
   // 登出
   if (path === "/api/admin/logout" && method === "POST") {
+    const secure = url.protocol === "https:";
     return new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json;charset=utf-8",
-        "set-cookie": "cd_admin=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",
+        "set-cookie": `cd_admin=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? "; Secure" : ""}`,
       },
     });
   }

@@ -13,12 +13,14 @@ function getCookie(req: Request, name: string): string | null {
   return null;
 }
 
-/** 登录成功后签发会话 Cookie（不加 Secure 以兼容本地 http 调试） */
-export async function createSession(env: Env): Promise<string> {
+/** 登录成功后签发会话 Cookie */
+export async function createSession(env: Env, secure = false): Promise<string> {
   const exp = Date.now() + SESSION_TTL_MS;
   const sig = await hmacB64url(env.admin, String(exp));
   const token = `${exp}.${sig}`;
-  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_TTL_MS / 1000}`;
+  // Secure 标志仅在 HTTPS 下追加，兼容本地 http 调试
+  const secureFlag = secure ? "; Secure" : "";
+  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_TTL_MS / 1000}${secureFlag}`;
 }
 
 /** 校验会话 Cookie，返回是否有效 */
