@@ -200,13 +200,17 @@ export async function addTraffic(env: Env, bytes: number): Promise<void> {
 
     // ② 更新 traffic_used_bytes —— 跨月逻辑完全内联在 SQL 里
     //    同月：累加旧值；跨月：从 0 开始加
+    //    settings.value 是 TEXT 列，SQLite 会自动把 INTEGER 结果存成字符串
     env.db.prepare(
-      `UPDATE settings SET value = CAST(
-        CASE
-          WHEN (SELECT value FROM settings WHERE key = 'traffic_month') = ?1
-          THEN COALESCE((SELECT value FROM settings WHERE key = 'traffic_used_bytes'), '0')
-          ELSE '0'
-        END AS INTEGER) + ?2 AS TEXT)
+      `UPDATE settings SET value = (
+        CAST(
+          CASE
+            WHEN (SELECT value FROM settings WHERE key = 'traffic_month') = ?1
+            THEN COALESCE((SELECT value FROM settings WHERE key = 'traffic_used_bytes'), '0')
+            ELSE '0'
+          END AS INTEGER
+        ) + ?2
+      )
        WHERE key = 'traffic_used_bytes'`
     ).bind(month, String(bytes)),
 
