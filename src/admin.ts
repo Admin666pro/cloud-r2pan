@@ -792,6 +792,9 @@ export async function handleAdminApi(
       admin_ips: s.adminIps,
       // 下载市场首页
       home_redirect_market: s.homeRedirectMarket,
+      // 错误日志系统
+      error_logging_enabled: s.errorLoggingEnabled,
+      error_log_webhook: s.errorLogWebhook,
     });
   }
 
@@ -846,6 +849,18 @@ export async function handleAdminApi(
     // 下载市场作为首页
     if (typeof body.home_redirect_market === "boolean") {
       patch.home_redirect_market = body.home_redirect_market ? "1" : "0";
+    }
+
+    // 错误日志开关
+    if (typeof body.error_logging_enabled === "boolean") {
+      patch.error_logging_enabled = body.error_logging_enabled ? "1" : "0";
+    }
+    // 错误日志 webhook
+    if (typeof body.error_log_webhook === "string") {
+      const wh = body.error_log_webhook.trim();
+      if (wh === "" || wh.startsWith("https://") || wh.startsWith("http://")) {
+        patch.error_log_webhook = wh;
+      }
     }
 
     await updateSettings(env, patch);
@@ -1259,6 +1274,42 @@ export async function handleAdminApi(
     ).all()).results;
 
     return json({ summary, batches });
+  }
+
+  // ── 错误日志（独立于 download_logs 的 /api/admin/logs） ────────────────
+  // GET    /api/admin/error-logs?page=1&size=50&level=error&tag=xxx&q=keyword
+  // DELETE /api/admin/error-logs
+  // DELETE /api/admin/error-logs/:id
+  if (path === "/api/admin/error-logs" && method === "GET") {
+    const url = new URL(req.url);
+    const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
+    const size = Math.min(200, Math.max(10, Number(url.searchParams.get("size")) || 50));
+    const level = url.searchParams.get("level")?.trim();
+    const tag = url.searchParams.get("tag")?.trim();
+    const q = url.searchParams.get("q")?.trim();
+    const where: string[] = [];
+    const binds: any[] = [];
+    if (level) { where.push("level = ?"); binds.push(level); }
+    if (tag) { where.push("tag LIKE ?"); binds.push(`%${tag}%`); }
+    if (q) { where.push("(message LIKE ? OR stack LIKE ?)"); binds.push(`%${q}%`, `%${q}%`); }
+    const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
+    const countRow: any = await env.db.prepare(
+      `SELECT COUNT(*) AS c FROM error_logs ${whereSql}`
+    ).bind(...binds).first();
+    const total = countRow?.c ?? 0;
+    const { results }: any = await env.db.prepare(
+      `SELECT * FROM error_logs ${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`
+    ).bind(...binds, size, (page - 1) * size).all();
+    return json({ ok: true, total, page, size, items: results ?? [] });
+  }
+  if (path === "/api/admin/error-logs" && method === "DELETE") {
+    const r = await env.db.prepare("DELETE FROM error_logs").run();
+    return json({ ok: true, deleted: r.meta.changes ?? 0 });
+  }
+  const logDeleteMatch = /^\/api\/admin\/error-logs\/(\d+)$/.exec(path);
+  if (logDeleteMatch && method === "DELETE") {
+    const r = await env.db.prepare("DELETE FROM error_logs WHERE id = ?1").bind(Number(logDeleteMatch[1])).run();
+    return json({ ok: true, deleted: r.meta.changes ?? 0 });
   }
 
   return json({ error: "not_found" }, 404);

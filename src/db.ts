@@ -143,6 +143,24 @@ const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_codes_status ON activation_codes(status)`,
   `CREATE INDEX IF NOT EXISTS idx_codes_batch ON activation_codes(batch_id)`,
   `CREATE INDEX IF NOT EXISTS idx_codes_code ON activation_codes(code)`,
+  // ═══════════ 错误日志系统 ═══════════
+  // 所有后端 catch 块 + 前端 window.onerror 都会写进来
+  `CREATE TABLE IF NOT EXISTS error_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    level TEXT NOT NULL DEFAULT 'error',
+    source TEXT NOT NULL DEFAULT 'server',
+    tag TEXT NOT NULL,
+    message TEXT NOT NULL,
+    stack TEXT,
+    url TEXT,
+    method TEXT,
+    ip TEXT,
+    ua TEXT,
+    extra TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_error_logs_created ON error_logs(created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_error_logs_tag ON error_logs(tag)`,
 ];
 
 let schemaReady = false;

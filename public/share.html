@@ -157,6 +157,31 @@ h1 { font-size: 21px; font-weight: 700; letter-spacing: -.02em; word-break: brea
 </a>
 
 <script>
+/* ═══════════ 全局错误上报 ═══════════
+   window.onerror + unhandledrejection → POST /api/log/client
+   失败静默，不影响正常功能。 */
+(function(){
+  function send(evt){
+    try {
+      const body = {
+        tag: evt.type || 'window.onerror',
+        level: 'error',
+        message: (evt.message || evt.reason?.message || String(evt)).slice(0,500),
+        stack: (evt.reason?.stack || evt.error?.stack || '').slice(0,2000),
+        url: location.href,
+        extra: { line: evt.lineno, col: evt.colno, href: location.href }
+      };
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/api/log/client', JSON.stringify(body));
+      } else {
+        fetch('/api/log/client', {method:'POST', keepalive:true, body:JSON.stringify(body)}).catch(()=>{});
+      }
+    } catch {}
+  }
+  window.addEventListener('error', send);
+  window.addEventListener('unhandledrejection', send);
+})();
+
 /* ═══════════ i18n ═══════════ */
 const I18N = {
   zh: {

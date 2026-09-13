@@ -11,12 +11,24 @@ import {
   handleOAuthProviders,
 } from "./oauth_handlers";
 import { findCodeByString, formatCodeStatus, checkCodeUsable } from "./codes";
+import { logError, extractError } from "./logger";
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     try {
       return await route(req, env, ctx);
     } catch (err) {
+      const { message, stack } = extractError(err);
+      const url = new URL(req.url);
+      // 同步 await 保证日志不会丢（在 catch 块里，response 还没发）
+      await logError(env, {
+        tag: "index.fetch",
+        message,
+        stack,
+        url: url.pathname,
+        method: req.method,
+        ip: req.headers.get("cf-connecting-ip") ?? undefined,
+      });
       console.error("unhandled error:", err);
       return errorPage(
         req,
@@ -49,6 +61,32 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   // 管理 API
   if (path.startsWith("/api/admin/")) {
     return handleAdminApi(req, env, ctx, path);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // 客户端错误上报 —— 前端 window.onerror / unhandledrejection POST 到这里
+  // 不需要登录，任何人都能上报（但只存到 D1）
+  // ══════════════════════════════════════════════════════════════
+  if (path === "/api/log/client" && req.method === "POST") {
+    try {
+      await ensureSchema(env);
+      const body: any = await req.json();
+      await logError(env, {
+        source: "client",
+        level: body.level ?? "error",
+        tag: body.tag ?? "window.onerror",
+        message: String(body.message ?? "unknown"),
+        stack: body.stack,
+        url: body.url ?? (new URL(req.url)).pathname,
+        method: "POST",
+        ip: req.headers.get("cf-connecting-ip") ?? undefined,
+        ua: req.headers.get("user-agent") ?? undefined,
+        extra: body.extra ? JSON.stringify(body.extra).slice(0, 2000) : undefined,
+      });
+    } catch {
+      // 日志自己不能抛
+    }
+    return Response.json({ ok: true });
   }
 
   // ══════════════ OAuth2 路由 ══════════════

@@ -69,6 +69,12 @@ export interface Settings {
   // ═══════ 下载市场首页 ═══════
   /** 是否将根路径 "/" 重定向到下载市场（而不是 /admin）。默认 false。 */
   homeRedirectMarket: boolean;
+
+  // ═══════ 错误日志系统 ═══════
+  /** 是否启用错误日志（全局开关，关闭后所有 catch 都静默） */
+  errorLoggingEnabled: boolean;
+  /** 错误日志 webhook URL（可选，管理员填后每次错误会 POST 到这里，用于 Slack/Discord/邮件通知） */
+  errorLogWebhook: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -100,6 +106,9 @@ export const DEFAULT_SETTINGS: Settings = {
   adminIps: "",
   // 下载市场
   homeRedirectMarket: false,
+  // 错误日志
+  errorLoggingEnabled: true,
+  errorLogWebhook: "",
 };
 
 function toInt(v: unknown, fallback: number): number {
@@ -155,6 +164,8 @@ export async function getSettings(env: Env): Promise<Settings> {
     oauthCustomTokenField: map.get("oauth_custom_token_field") ?? DEFAULT_SETTINGS.oauthCustomTokenField,
     adminIps: map.get("admin_ips") ?? "",
     homeRedirectMarket: map.get("home_redirect_market") === "1",
+    errorLoggingEnabled: (map.get("error_logging_enabled") ?? "1") === "1",
+    errorLogWebhook: map.get("error_log_webhook") ?? "",
   };
 }
 
@@ -166,6 +177,12 @@ export async function updateSettings(env: Env, patch: Partial<Record<string, str
     ).bind(key, String(value))
   );
   if (upserts.length > 0) await env.db.batch(upserts);
+
+  // 如果日志开关被改动，清掉 logger 的缓存让新值立即生效
+  if ("error_logging_enabled" in patch) {
+    const { invalidateLogCache } = await import("./logger");
+    invalidateLogCache();
+  }
 }
 
 /**

@@ -315,6 +315,29 @@ body {
 <div id="app"><div class="spin"></div></div>
 
 <script>
+/* ═══════════ 全局错误上报 ═══════════ */
+(function(){
+  function send(evt){
+    try {
+      const body = {
+        tag: evt.type || 'window.onerror',
+        level: 'error',
+        message: (evt.message || evt.reason?.message || String(evt)).slice(0,500),
+        stack: (evt.reason?.stack || evt.error?.stack || '').slice(0,2000),
+        url: location.href,
+        extra: { line: evt.lineno, col: evt.colno, href: location.href }
+      };
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/api/log/client', JSON.stringify(body));
+      } else {
+        fetch('/api/log/client', {method:'POST', keepalive:true, body:JSON.stringify(body)}).catch(()=>{});
+      }
+    } catch {}
+  }
+  window.addEventListener('error', send);
+  window.addEventListener('unhandledrejection', send);
+})();
+
 /* ═══════════ i18n ═══════════ */
 const I18N = {
   zh: {
