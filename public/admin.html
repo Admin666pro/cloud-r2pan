@@ -1959,6 +1959,23 @@ async function loadSettings(){
       </div>
       <div class="tip" style="margin-top:8px">${esc(t('homeRedirectMarketHint'))}</div>
     </div>
+    <!-- 错误日志 -->
+    <div class="glass group">
+      <div class="row">
+        <div class="info"><div class="t">📋 错误日志</div><div class="d">记录所有后端/前端错误，方便排查</div></div>
+        <label class="switch">
+          <input type="checkbox" id="st-log-enabled" ${s.error_logging_enabled ? 'checked' : ''}>
+          <span class="track"><span class="thumb"></span></span>
+        </label>
+      </div>
+      <div class="row" style="flex-direction:column;align-items:stretch;gap:8px;margin-top:6px">
+        <div class="info" style="margin-bottom:2px"><div class="t">🔔 Webhook 通知（可选）</div><div class="d">填后每次错误会 POST 到这个 URL，可接 Slack/Discord/邮件服务</div></div>
+        <input type="text" id="st-log-webhook" value="${esc(s.error_log_webhook ?? '')}" placeholder="https://hooks.slack.com/services/..." style="width:100%;padding:10px 12px;border-radius:12px;font-size:13px;color:#fff;background:rgba(255,255,255,.09);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:10px">
+        <button class="btn sm" id="st-view-logs">📊 查看错误日志</button>
+      </div>
+    </div>
     <!-- 2FA 组 -->
     <div class="glass group">
       <div class="row">
@@ -2063,6 +2080,38 @@ async function loadSettings(){
     const r = await api('/api/admin/logs?mode=all', { method:'DELETE' });
     toast(t('clearedN', {n: r.deleted}));
   });
+  $('#st-view-logs')?.addEventListener('click', async () => {
+    const data = await api('/api/admin/error-logs?size=50');
+    const items = data.items || [];
+    const rows = items.length === 0
+      ? `<div style="text-align:center;padding:40px 0;color:var(--text-3)">暂无错误日志 ✨</div>`
+      : items.map(e => `
+        <div style="border-bottom:1px solid var(--stroke);padding:12px 0;font-size:12.5px">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">
+            <span style="color:${e.source==='client'?'#a5d8ff':'#fda293'};font-weight:600;font-size:11px">${esc(e.source?.toUpperCase())}</span>
+            <span style="color:#6ee7b7;font-size:11px">${esc(e.level)}</span>
+            <span style="color:rgba(255,255,255,.5);font-family:ui-monospace,monospace;font-size:11px">${esc(e.tag)}</span>
+            <span style="margin-left:auto;color:rgba(255,255,255,.3);font-size:11px">${esc(new Date(e.created_at).toLocaleString())}</span>
+          </div>
+          <div style="color:#fff;line-height:1.5">${esc(e.message)}</div>
+          ${e.stack ? `<pre style="margin-top:6px;padding:8px;background:rgba(0,0,0,.3);border-radius:8px;font-size:11px;color:#a5d8ff;white-space:pre-wrap;max-height:120px;overflow:auto">${esc(e.stack)}</pre>` : ''}
+          ${e.url ? `<div style="margin-top:4px;color:rgba(255,255,255,.4);font-size:11px">${esc(e.method||'GET')} ${esc(e.url)}</div>` : ''}
+        </div>`).join('');
+    openModal(`
+      <h3>📋 错误日志 <span style="color:var(--text-3);font-size:13px;font-weight:400">共 ${data.total} 条</span></h3>
+      <div style="max-height:60vh;overflow-y:auto;margin-top:10px">${rows}</div>
+      <div class="actions" style="margin-top:16px">
+        <button class="btn danger" id="clear-elogs">🗑️ 清空全部</button>
+        <button class="btn primary" data-x>${esc(t('close'))}</button>
+      </div>
+    `);
+    $('#clear-elogs')?.addEventListener('click', async () => {
+      if(!(await confirmDialog('清空全部错误日志？','此操作不可恢复',true))) return;
+      await api('/api/admin/error-logs', {method:'DELETE'});
+      closeModal();
+      toast('已清空');
+    });
+  });
   $('#st-save')?.addEventListener('click', async () => {
     // 现在只保存非 Modal 的设置项；Turnstile 和 OAuth Provider 在各自 Modal 里保存
     const body = {
@@ -2075,6 +2124,9 @@ async function loadSettings(){
       oauth_enabled: $('#oauth-enabled').checked,
       admin_ips: $('#st-adminips').value.trim(),
       home_redirect_market: $('#st-home-market').checked,
+      // 错误日志
+      error_logging_enabled: $('#st-log-enabled').checked,
+      error_log_webhook: $('#st-log-webhook').value.trim(),
     };
     await api('/api/admin/settings', { method:'PUT', body: JSON.stringify(body) });
     toast(t('saved'));

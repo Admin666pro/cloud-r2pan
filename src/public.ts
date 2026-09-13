@@ -149,6 +149,29 @@ async function verifyShareToken(env: Env, token: string, query: string): Promise
 
 /** GET /s/:token —— 分享页元信息（供前端渲染） */
 export async function handleShareInfo(req: Request, env: Env, token: string): Promise<Response> {
+  try {
+    return await handleShareInfoImpl(req, env, token);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    console.error("[handleShareInfo]", msg);
+    // 尝试写日志（但如果日志系统自己又抛就静默）
+    try {
+      const { logError, extractError } = await import("./logger");
+      const { message, stack } = extractError(err);
+      await logError(env, {
+        tag: "share.info",
+        message,
+        stack,
+        url: `/s/${token}/info`,
+        method: "GET",
+        ip: req.headers.get("cf-connecting-ip") ?? undefined,
+      });
+    } catch {}
+    return Response.json({ error: "server_error", message: msg }, { status: 500 });
+  }
+}
+
+async function handleShareInfoImpl(req: Request, env: Env, token: string): Promise<Response> {
   const row = await getShare(env, token);
   if (!row) return Response.json({ error: "not_found" }, { status: 404 });
   const settings = await getSettings(env);
@@ -232,6 +255,27 @@ async function getShare(env: Env, token: string): Promise<ShareWithFile | null> 
 
 /** POST /s/:token/verify —— 校验分享密码 + 可选 Turnstile，成功后颁发下载令牌 */
 export async function handleVerify(req: Request, env: Env, token: string): Promise<Response> {
+  try {
+    return await handleVerifyImpl(req, env, token);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    console.error("[handleVerify]", msg);
+    try {
+      const { logError, extractError } = await import("./logger");
+      const { message, stack } = extractError(err);
+      await logError(env, {
+        tag: "share.verify",
+        message,
+        stack,
+        url: `/s/${token}/verify`,
+        method: "POST",
+        ip: req.headers.get("cf-connecting-ip") ?? undefined,
+      });
+    } catch {}
+    return Response.json({ error: "server_error", message: msg }, { status: 500 });
+  }
+}
+async function handleVerifyImpl(req: Request, env: Env, token: string): Promise<Response> {
   if (req.method !== "POST") return Response.json({ error: "method_not_allowed" }, { status: 405 });
   const row = await getShare(env, token);
   if (!row) return Response.json({ error: "not_found" }, { status: 404 });
@@ -265,6 +309,37 @@ export async function handleVerify(req: Request, env: Env, token: string): Promi
 
 /** GET /s/:token/download —— 下载主流程：封禁检查 → 有效性检查 → 流量限额 → 重复下载封禁 → 流式输出 */
 export async function handleDownload(
+  req: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  token: string
+): Promise<Response> {
+  try {
+    return await handleDownloadImpl(req, env, ctx, token);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    console.error("[handleDownload]", msg);
+    try {
+      const { logError, extractError } = await import("./logger");
+      const { message, stack } = extractError(err);
+      await logError(env, {
+        tag: "share.download",
+        message,
+        stack,
+        url: `/s/${token}/download`,
+        method: "GET",
+        ip: req.headers.get("cf-connecting-ip") ?? undefined,
+      });
+    } catch {}
+    return errorPage(
+      req, 500,
+      { zh: "下载服务暂时不可用", en: "Download Service Unavailable" },
+      { zh: msg, en: msg }
+    );
+  }
+}
+
+async function handleDownloadImpl(
   req: Request,
   env: Env,
   ctx: ExecutionContext,
