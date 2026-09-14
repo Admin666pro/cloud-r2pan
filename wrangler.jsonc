@@ -7,6 +7,16 @@
   // ═══════════════ 基础设施资源绑定（自动查找/创建） ═══════════════
   // 本地开发时 wrangler dev 自动创建本地实例；
   // 生产部署时自动在 Cloudflare 上查找同名资源并绑定。
+  //
+  // ⚠️ 关于绑定的持久性 —— 重要！
+  //   这些资源绑定和 Cloudflare Secrets（admin、totp_recovery 等）
+  //   都是存储在 Cloudflare 侧的，不属于代码仓库。
+  //   所以：
+  //     ✅ 首次部署：先手动创建资源 + 配置 Secret（控制台或 wrangler secret put）
+  //     ✅ 后续更新：只需要 `npm run deploy` 更新代码
+  //                 已有的资源绑定和 Secret 会自动续上，**不会丢失、不需要重新配置**
+  //     ❌ 不要在 wrangler.jsonc 里写 Secret 的明文值！
+  //
   // 如果 Cloudflare 控制台已手动配置同名绑定，会优先复用控制台配置，不会覆盖。
   "d1_databases": [
     {

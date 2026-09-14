@@ -2,6 +2,15 @@
 
 本项目有 **两种部署模式**，根据你的存储需求选择：
 
+> 📌 **重要提示（必读）**
+>
+> 本项目的「资源绑定」（D1、R2、Analytics Engine）和「密钥/Secret」（admin 密码、Turnstile 密钥等）
+> 都存储在 **Cloudflare 侧**，不属于代码仓库。因此：
+>
+> - **首次部署**：需要手动创建资源 + 配置 Secret（下面的准备工作和第五节）
+> - **后续更新代码**：只需要跑 `npm run deploy`，已有的资源绑定和 Secret **会自动续上，不会丢失，也不需要重新配置**
+> - 不要把 Secret 的明文值写到 `wrangler.jsonc` 或任何代码文件里
+
 | 模式 | 存储后端 | 适用场景 | 费用 |
 |---|---|---|---|
 | **Cloudflare 全家桶** | R2（Worker binding 零配置） | 不想维护外部服务，Cloudflare 内部生态 | R2 免费 10GB + 零出口费 |
@@ -233,6 +242,10 @@ npx wrangler secret put turnstile_sitekey # 可选
 | `turnstile_secret` | ❌ | Turnstile 后端 Secret |
 
 > 💡 S3 的 Access Key 和 Secret Key **不走 Cloudflare Secret**，存在 D1 `settings` 表里，Secret Access Key 用 `admin` 密钥 AES-GCM 加密。这样避免了在 Cloudflare 控制台管理多套 Secret。
+
+> ✅ **这一节只需要做一次**。Cloudflare Secrets 存储在 Cloudflare 服务器上，不属于代码仓库。
+> 以后更新代码跑 `npm run deploy` 时，已有的 Secret **完全不会被影响，自动续上，不会丢失**。
+> 要修改密码也不需要重新部署——直接在 Cloudflare 后台改 Secret 即可，Worker 下次请求就会读到新值。
 
 ---
 

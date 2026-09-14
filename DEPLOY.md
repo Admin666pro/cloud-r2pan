@@ -1,5 +1,16 @@
 # 部署步骤
 
+> 📌 **重要提示（必读）**
+>
+> 本项目的「资源绑定」（D1、R2、Analytics Engine）和「密钥/Secret」（admin 密码、Turnstile 密钥等）
+> 都存储在 **Cloudflare 侧**，不属于代码仓库。因此：
+>
+> - **首次部署**：需要手动创建资源 + 配置 Secret（下面第 2~4 步）
+> - **后续更新代码**：只需要跑 `npm run deploy`，已有的资源绑定和 Secret **会自动续上，不会丢失，也不需要重新配置**
+> - 不要把 Secret 的明文值写到 `wrangler.jsonc` 或任何代码文件里
+
+---
+
 ## 1. 安装依赖 & 登录
 
 ```bash
@@ -52,10 +63,14 @@ npx wrangler login
 - Variable name：**`r2`**（固定，代码里就叫这个，别改）
 - Bucket：选 **cloud-r2pan**
 
+> ✅ **这一步只需要做一次**。`wrangler.jsonc` 里已经声明了 `r2_buckets`，但首次部署后 Cloudflare 会让你在控制台确认绑定，后续就自动续上了。
+
 ### 3.2 绑定 D1 Database
 
 - Variable name：**`db`**（固定，别改）
 - Database：选 **cloud-r2pan**（或直接粘贴第 2.2 步的 Database ID）
+
+> ✅ **这一步只需要做一次**。以后更新代码跑 `npm run deploy` 时，Cloudflare 会自动复用已有的绑定，不会丢。
 
 ---
 
@@ -73,6 +88,10 @@ npx wrangler login
 > Turnstile 申请方式：Cloudflare 左侧菜单 → **Turnstile** → **Add site** → Site name 随便填，Domain 填你最终用的域名（workers.dev 子域或自定义域），拿 Sitekey 和 Secret key。
 
 每加一个 Secret 点 **Save**。
+
+> ✅ **这一步只需要做一次**。Cloudflare Secrets 存储在 Cloudflare 服务器上，不属于代码仓库。
+> 以后更新代码跑 `npm run deploy` 时，已有的 Secret **完全不会被影响，自动续上，不会丢失**。
+> 要修改密码也不需要重新部署——直接在 Cloudflare 后台改 Secret 即可，Worker 下次请求就会读到新值。
 
 ---
 
