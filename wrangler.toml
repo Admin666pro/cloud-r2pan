@@ -2,8 +2,14 @@ name = "cloud-r2pan"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
 
-[vars]
-admin = "test123"
+# ⚠️ 不要在这里写 admin 等敏感环境变量！
+# 本地开发：放在 .dev.vars（已 gitignore，格式: KEY=value）
+# 生产部署：用 wrangler secret put <NAME> 或 Cloudflare Dashboard → Workers & Pages → Settings → Variables and Secrets → Secrets
+#
+# 如果 Cloudflare 自动构建后 Secrets 丢失，常见原因：
+#   1. 你把 Secret 名字拼错了（大小写敏感）
+#   2. Secrets 配在了错误的环境（Production vs Preview）
+#   3. .dev.vars 被误提交到 git 并被 CI 用成了 secrets.toml 的来源
 
 [[d1_databases]]
 binding = "db"

@@ -2013,10 +2013,8 @@ let _stgPrefix = '';
 let _stgMarker = undefined;
 async function loadStorage(){
   const isZh = LANG === "zh";
-  const $ = (id) => document.getElementById(id);
-  const view = $('#view');
+  const getView = () => document.getElementById('view');
 
-  // 面包屑辅助：从 prefix 构建层级数组
   function breadcrumbs(prefix){
     const parts = prefix ? prefix.split('/').filter(Boolean) : [];
     const arr = [{ name: isZh ? '根目录' : 'Root', prefix: '' }];
@@ -2029,6 +2027,8 @@ async function loadStorage(){
   }
 
   async function render(){
+    const view = getView();
+    if (!view) return;
     view.innerHTML = `<div class="spin"></div>`;
     try{
       const url = `/api/admin/storage/objects?prefix=${encodeURIComponent(_stgPrefix || '')}${_stgMarker ? '&marker=' + encodeURIComponent(_stgMarker) : ''}&limit=100`;
@@ -2036,7 +2036,6 @@ async function loadStorage(){
       const kind = r.kind === 's3' ? 'S3' : 'R2';
       const bc = breadcrumbs(_stgPrefix);
 
-      // 面包屑 HTML
       const bcHtml = bc.map((part, i) => {
         const isLast = i === bc.length - 1;
         const label = esc(part.name);
@@ -2049,7 +2048,7 @@ async function loadStorage(){
         return a.name.localeCompare(b.name);
       });
 
-      let html = `
+      let html2 = `
         <div class="glass group" style="padding:18px 22px">
           <div class="row" style="gap:12px;flex-wrap:wrap">
             <div style="flex:1;min-width:260px">
@@ -2078,12 +2077,12 @@ async function loadStorage(){
             <tbody id="stg-tbody">
       `;
       if (rows.length === 0){
-        html += `<tr><td colspan="5" style="text-align:center;padding:48px;opacity:.6">${isZh ? '此目录为空' : 'This directory is empty'}</td></tr>`;
+        html2 += `<tr><td colspan="5" style="text-align:center;padding:48px;opacity:.6">${isZh ? '此目录为空' : 'This directory is empty'}</td></tr>`;
       } else {
-        html += rows.map(e => {
-          const checked = `data-key="${esc(e.key)}"`;
+        html2 += rows.map(e => {
+          const rowKey = esc(e.key);
           if (e.isDir){
-            return `<tr ${checked}>
+            return `<tr data-key="${rowKey}">
               <td></td>
               <td><a href="javascript:void(0)" class="stg-dir" data-prefix="${esc(e.key)}" style="text-decoration:none;color:inherit;display:inline-flex;align-items:center;gap:8px">📁 <strong>${esc(e.name.replace(/\/$/, ''))}</strong></a></td>
               <td style="opacity:.35">—</td>
@@ -2092,28 +2091,28 @@ async function loadStorage(){
             </tr>`;
           }
           const icon = ficon(e.name);
-          return `<tr ${checked}>
+          return `<tr data-key="${rowKey}">
             <td><input type="checkbox" class="stg-chk"></td>
             <td style="display:flex;align-items:center;gap:10px">${icon}<span style="font-family:ui-monospace,monospace">${esc(e.name)}</span></td>
             <td class="num">${fmtSize(e.size)}</td>
             <td class="num" style="white-space:nowrap">${e.lastModified ? fmtTime(e.lastModified) : '—'}</td>
             <td style="white-space:nowrap">
-              <button class="btn sm" data-copy-key="${esc(e.key)}">${isZh ? '复制Key' : 'Copy Key'}</button>
+              <button class="btn sm" data-copy-key="${rowKey}">${isZh ? '复制Key' : 'Copy Key'}</button>
             </td>
           </tr>`;
         }).join('');
       }
-      html += `</tbody></table>
+      html2 += `</tbody></table>
         </div>
         ${r.truncated ? `<div style="text-align:center;padding:14px"><button class="btn" id="stg-load-more">${isZh ? '加载更多…' : 'Load more…'}</button></div>` : ''}
       `;
-      view.innerHTML = html;
+      const v2 = getView();
+      if (v2) v2.innerHTML = html2;
 
-      // ── 事件绑定 ──
-      $('#stg-refresh')?.addEventListener('click', () => { _stgMarker = undefined; render(); });
-      $('#stg-load-more')?.addEventListener('click', () => { render(); });
+      // ── 事件绑定（只绑一次成功渲染后） ──
+      document.getElementById('stg-refresh')?.addEventListener('click', () => { _stgMarker = undefined; render(); });
+      document.getElementById('stg-load-more')?.addEventListener('click', () => { render(); });
 
-      // 面包屑点击 → 跳转到上级/指定目录
       document.querySelectorAll('.stg-bc').forEach(a => {
         a.addEventListener('click', () => {
           _stgPrefix = a.dataset.prefix || '';
@@ -2122,7 +2121,6 @@ async function loadStorage(){
         });
       });
 
-      // 目录点击 → 进入子目录
       document.querySelectorAll('.stg-dir').forEach(a => {
         a.addEventListener('click', () => {
           _stgPrefix = a.dataset.prefix || '';
@@ -2131,21 +2129,18 @@ async function loadStorage(){
         });
       });
 
-      // 复制 key
       document.querySelectorAll('[data-copy-key]').forEach(b => {
         b.addEventListener('click', () => copyText(b.dataset.copyKey));
       });
 
-      // 全选 / 单选中
-      const checkAll = $('#stg-check-all');
+      const checkAll = document.getElementById('stg-check-all');
       if (checkAll){
         checkAll.addEventListener('change', () => {
           document.querySelectorAll('.stg-chk').forEach(c => c.checked = checkAll.checked);
         });
       }
 
-      // 批量删除
-      $('#stg-delete-sel')?.addEventListener('click', async () => {
+      document.getElementById('stg-delete-sel')?.addEventListener('click', async () => {
         const keys = [...document.querySelectorAll('.stg-chk:checked')].map(c => c.closest('tr')?.dataset.key).filter(Boolean);
         if (keys.length === 0){ toast(isZh ? '请先选择要删除的对象' : 'Select at least one object first', 'err'); return; }
         if (!(await confirmDialog(
@@ -2154,14 +2149,15 @@ async function loadStorage(){
           true
         ))) return;
         try{
-          const r = await api('/api/admin/storage/objects', { method:'DELETE', body: JSON.stringify({ keys }) });
-          toast((isZh ? '已删除 {n} 个对象' : 'Deleted {n} objects').replace('{n}', r.deleted));
+          const r2 = await api('/api/admin/storage/objects', { method:'DELETE', body: JSON.stringify({ keys }) });
+          toast((isZh ? '已删除 {n} 个对象' : 'Deleted {n} objects').replace('{n}', r2.deleted));
           _stgMarker = undefined;
           render();
-        }catch(e){ toast(e.message, 'err'); }
+        }catch(e2){ toast(e2.message, 'err'); }
       });
     }catch(e){
-      view.innerHTML = `<div class="glass group" style="padding:32px;text-align:center;opacity:.85">
+      const v3 = getView();
+      if (v3) v3.innerHTML = `<div class="glass group" style="padding:32px;text-align:center;opacity:.85">
         <div style="font-size:18px;font-weight:600;margin-bottom:8px">${isZh ? '存储浏览暂不可用' : 'Storage browser unavailable'}</div>
         <div style="font-size:13px;opacity:.7">${esc(e.message || e)}</div>
       </div>`;
