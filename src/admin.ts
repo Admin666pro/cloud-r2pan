@@ -1031,6 +1031,10 @@ export async function handleAdminApi(
       s3_access_key_id: s.s3AccessKeyId,
       s3_addressing_style: s.s3AddressingStyle || "path",
       s3_secret_configured: !!s.s3SecretKeyCipher,
+      // 远程 WebDAV 挂载（出站）
+      storage_webdav_url: s.storageWebdavUrl,
+      storage_webdav_username: s.storageWebdavUsername,
+      storage_webdav_password_configured: !!s.storageWebdavPasswordCipher,
       // Analytics Engine
       analytics_engine_available: !!env.analytics,
       // UI 主题
@@ -1110,7 +1114,7 @@ export async function handleAdminApi(
     // ── 存储后端 ──
     if (typeof body.storage_provider === "string") {
       const sp = body.storage_provider;
-      if (sp === "r2" || sp === "s3") {
+      if (sp === "r2" || sp === "s3" || sp === "webdav") {
         patch.storage_provider = sp;
       }
     }
@@ -1132,6 +1136,18 @@ export async function handleAdminApi(
         if (cipher) patch.s3_secret_key_cipher = cipher;
       }
       // raw === "__keep__" 或不传 → 保留原值不动
+    }
+    // 远程 WebDAV 挂载
+    if (typeof body.storage_webdav_url === "string") patch.storage_webdav_url = body.storage_webdav_url.trim().replace(/\/+$/, "");
+    if (typeof body.storage_webdav_username === "string") patch.storage_webdav_username = body.storage_webdav_username.trim();
+    if (typeof body.storage_webdav_password === "string") {
+      const raw = body.storage_webdav_password;
+      if (raw === "") {
+        patch.storage_webdav_password_cipher = "";
+      } else if (raw !== "__keep__") {
+        const cipher = await encryptSecret(raw, env.admin);
+        if (cipher) patch.storage_webdav_password_cipher = cipher;
+      }
     }
 
     // UI 主题
@@ -1612,7 +1628,47 @@ export async function handleAdminApi(
     const body = await readJson<any>(req);
     const s = await getSettings(env);
 
-    // 如果 body 里没传任何 S3 字段，用 settings 里的
+    // ① WebDAV 测试 —— 优先
+    const useWebdav =
+      (body.provider ?? s.storageProvider) === "webdav" &&
+      (body.url ?? s.storageWebdavUrl) &&
+      (body.username ?? s.storageWebdavUsername);
+
+    if (useWebdav) {
+      const { createWebDAVProvider } = await import("./storage");
+      const password = body.password?.trim()
+        ? body.password.trim()
+        : (s.storageWebdavPasswordCipher ? await decryptSecret(s.storageWebdavPasswordCipher, env.admin) : null);
+      if (!password) {
+        return json({ ok: false, error: "missing_webdav_password" }, 400);
+      }
+      try {
+        const prov = createWebDAVProvider({
+          url: (body.url ?? s.storageWebdavUrl!).trim().replace(/\/+$/, ""),
+          username: (body.username ?? s.storageWebdavUsername!).trim(),
+          password,
+        });
+        // 先 list 一下根目录，确认认证 + PROPFIND 正常
+        const listed = await prov.list({ prefix: "", limit: 5 });
+        return json({
+          ok: true,
+          provider: "webdav",
+          url: (body.url ?? s.storageWebdavUrl!).trim(),
+          username: (body.username ?? s.storageWebdavUsername!).trim(),
+          entries_found: listed.entries.length,
+          truncated: listed.truncated,
+        });
+      } catch (err: any) {
+        return json({
+          ok: false,
+          error: "webdav_test_failed",
+          message: String(err?.message ?? err),
+          detail: err?.stack ?? "",
+        }, 502);
+      }
+    }
+
+    // ② S3 测试
     const useS3 =
       (body.provider ?? s.storageProvider) === "s3" &&
       (body.endpoint ?? s.s3Endpoint) &&
