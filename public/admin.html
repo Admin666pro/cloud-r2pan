@@ -856,6 +856,21 @@ const I18N = {
     oauthAddTitle: '添加 OAuth2 Provider',
     oauthLabel: '显示名称',
     oauthKeepSecret: '保持现有 Secret 不变',
+    // 存储后端（出站）
+    storageBackendTitle: '💾 存储后端',
+    storageBackendD: '默认使用 Cloudflare R2（零配置）；也可挂载外部 S3 兼容存储或任何支持 WebDAV 的网盘（坚果云 / 阿里云盘 / OneDrive / Nextcloud 等）',
+    storageBackendR2: 'Cloudflare R2（默认）',
+    storageBackendS3: 'S3 兼容存储',
+    storageBackendWebDAV: '远程 WebDAV 网盘',
+    storageBackendNotSet: '未配置',
+    storageBackendUrl: '服务器地址',
+    storageBackendUser: '用户名',
+    storageBackendPwd: '密码',
+    storageBackendPwdKeep: '留空保持不变',
+    storageBackendConfig: '配置',
+    storageBackendTest: '测试连接',
+    storageBackendConnected: '连接成功',
+    storageBackendConnectFail: '连接失败',
     // WebDAV
     webdavGroupTitle: '🗂️ WebDAV 文件共享',
     webdavGroupD: '开启后可通过 WebDAV 客户端（Finder / Explorer / nPlayer 等）以读写方式管理文件，也能直接在浏览器地址栏挂载',
@@ -1200,6 +1215,21 @@ const I18N = {
     oauthAddTitle: 'Add OAuth2 Provider',
     oauthLabel: 'Display Name',
     oauthKeepSecret: 'Keep existing secret unchanged',
+    // Storage backend (outbound)
+    storageBackendTitle: '💾 Storage Backend',
+    storageBackendD: 'Cloudflare R2 by default (zero config). Optionally mount an external S3-compatible store or any WebDAV cloud drive (Jianguoyun / Aliyun Drive / OneDrive / Nextcloud…)',
+    storageBackendR2: 'Cloudflare R2 (default)',
+    storageBackendS3: 'S3-compatible storage',
+    storageBackendWebDAV: 'Remote WebDAV cloud',
+    storageBackendNotSet: 'Not configured',
+    storageBackendUrl: 'Server URL',
+    storageBackendUser: 'Username',
+    storageBackendPwd: 'Password',
+    storageBackendPwdKeep: 'Leave blank to keep unchanged',
+    storageBackendConfig: 'Configure',
+    storageBackendTest: 'Test connection',
+    storageBackendConnected: 'Connected',
+    storageBackendConnectFail: 'Connection failed',
     // WebDAV
     webdavGroupTitle: '🗂️ WebDAV File Sharing',
     webdavGroupD: 'Enable to mount your storage as a read-write drive from WebDAV clients (Finder / Explorer / nPlayer), or directly via the browser address bar.',
@@ -2033,7 +2063,7 @@ async function loadStorage(){
     try{
       const url = `/api/admin/storage/objects?prefix=${encodeURIComponent(_stgPrefix || '')}${_stgMarker ? '&marker=' + encodeURIComponent(_stgMarker) : ''}&limit=100`;
       const r = await api(url);
-      const kind = r.kind === 's3' ? 'S3' : 'R2';
+      const kind = r.kind === 'r2' ? 'R2' : r.kind === 'webdav' ? 'WebDAV' : 'S3';
       const bc = breadcrumbs(_stgPrefix);
 
       const bcHtml = bc.map((part, i) => {
@@ -3251,6 +3281,34 @@ async function loadSettings(){
         <button class="btn primary" id="oauth-add" style="padding:10px 20px;font-size:13px;border-radius:14px">+ ${esc(t('oauthAddProvider'))}</button>
       </div>
     </div>
+    <!-- 存储后端 -->
+    <div class="glass group">
+      <div class="row" style="align-items:flex-start">
+        <div class="info" style="flex:1">
+          <div class="t">${esc(t('storageBackendTitle'))}</div>
+          <div class="d" style="font-size:12px;line-height:1.6;margin-top:2px">${esc(t('storageBackendD'))}</div>
+        </div>
+        <select id="st-backend" style="padding:9px 14px;border-radius:12px;background:var(--sf-input);border:1px solid var(--stroke-strong);color:var(--text);font-size:14px;font-family:inherit;outline:none;min-width:170px">
+          <option value="r2" ${(s.storage_provider||'r2')==='r2'?'selected':''}>${esc(t('storageBackendR2'))}</option>
+          <option value="s3" ${s.storage_provider==='s3'?'selected':''}>${esc(t('storageBackendS3'))}</option>
+          <option value="webdav" ${s.storage_provider==='webdav'?'selected':''}>${esc(t('storageBackendWebDAV'))}</option>
+        </select>
+      </div>
+      <div style="font-size:12px;line-height:1.7;margin-top:10px">
+        ${(s.storage_provider||'r2')==='webdav'
+          ? `<span style="${s.storage_webdav_url && s.storage_webdav_username && s.storage_webdav_password_configured ? 'color:#6ee7b7' : 'color:#fda293'}">`
+            + (s.storage_webdav_url && s.storage_webdav_username && s.storage_webdav_password_configured
+              ? `✓ WebDAV: ${esc(s.storage_webdav_url)} · ${esc(s.storage_webdav_username)}`
+              : `⚠ ${esc(t('storageBackendNotSet'))}`)
+            + `</span>`
+          : (s.storage_provider==='s3'
+              ? `<span style="${s.s3_endpoint && s.s3_bucket ? 'color:#6ee7b7' : 'color:#fda293'}">S3: ${esc(s.s3_endpoint||'')} / ${esc(s.s3_bucket||'')||'⚠ '+esc(t('storageBackendNotSet'))}</span>`
+              : `<span style="color:#6ee7b7">✓ ${esc(t('storageBackendR2'))}</span>`)}
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:10px;gap:8px">
+        <button class="btn sm" id="st-backend-webdav-cfg" style="${(s.storage_provider||'r2')==='webdav' ? '' : 'opacity:.5'}">🔗 ${esc(t('storageBackendConfig'))} WebDAV</button>
+      </div>
+    </div>
     <!-- 数据库健康 -->
     <div class="glass group">
       <div class="row" style="align-items:flex-start">
@@ -3361,10 +3419,96 @@ async function loadSettings(){
       home_redirect_market: $('#st-home-market').checked,
       codes_floating_button_enabled: $('#st-codes-float').checked,
       codes_floating_button_position: $('#st-codes-pos').value,
+      storage_provider: $('#st-backend').value,
     };
     await api('/api/admin/settings', { method:'PUT', body: JSON.stringify(body) });
     toast(t('saved'));
     loadSettings();
+  });
+
+  // ═══════════════════════════════════
+  // WebDAV 存储后端配置 Modal
+  // ═══════════════════════════════════
+  $('#st-backend-webdav-cfg')?.addEventListener('click', async () => {
+    const s = await api('/api/admin/settings');
+    openModal(`
+      <h3>🔗 WebDAV ${esc(t('storageBackendConfig'))}</h3>
+      <div class="sub" style="font-size:12.5px;line-height:1.6">
+        ${LANG==='zh'
+          ? '填入任意支持 WebDAV 的网盘地址，如：<br>• 坚果云: <code>https://dav.jianguoyun.com/dav/</code><br>• OneDrive: <code>https://dav.onedrive.com/</code>'
+          : 'Enter any WebDAV-enabled cloud drive URL, e.g.:<br>• Jianguoyun: <code>https://dav.jianguoyun.com/dav/</code><br>• OneDrive: <code>https://dav.onedrive.com/</code>'}
+      </div>
+      <div class="field" style="margin-top:14px">
+        <label>${esc(t('storageBackendUrl'))}</label>
+        <input type="text" id="wd-url" value="${esc(s.storage_webdav_url ?? '')}" placeholder="https://dav.jianguoyun.com/dav/" style="width:100%;padding:10px 12px;border-radius:12px;font-size:13px;color:var(--text);background:var(--sf-input);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
+      </div>
+      <div class="field">
+        <label>${esc(t('storageBackendUser'))}</label>
+        <input type="text" id="wd-user" value="${esc(s.storage_webdav_username ?? '')}" placeholder="your@email.com" style="width:100%;padding:10px 12px;border-radius:12px;font-size:13px;color:var(--text);background:var(--sf-input);border:1px solid var(--stroke-strong);outline:none">
+      </div>
+      <div class="field">
+        <label>${esc(t('storageBackendPwd'))}</label>
+        <input type="password" id="wd-pwd" value="" placeholder="${s.storage_webdav_password_configured ? esc(t('storageBackendPwdKeep')) : ''}" style="width:100%;padding:10px 12px;border-radius:12px;font-size:13px;color:var(--text);background:var(--sf-input);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
+        <div class="tip" style="line-height:1.6;margin-top:4px">
+          ${s.storage_webdav_password_configured
+            ? `<span style="color:#6ee7b7">✓ ${LANG==='zh'?'已设置':'Set'}</span> — ${esc(t('storageBackendPwdKeep'))}`
+            : `<span style="color:#fda293">⚠ ${LANG==='zh'?'未设置':'Not set'}</span>`}
+        </div>
+      </div>
+      <div class="field" style="margin-top:4px">
+        <button class="btn sm" id="wd-test" style="padding:8px 16px;font-size:12.5px;border-radius:12px">🧪 ${esc(t('storageBackendTest'))}</button>
+        <span id="wd-test-result" style="margin-left:10px;font-size:12.5px;color:var(--text-3)"></span>
+      </div>
+      <div class="actions" style="margin-top:18px">
+        <button class="btn" data-x>${esc(t('cancel'))}</button>
+        <button class="btn primary" id="wd-save">${esc(t('save'))}</button>
+      </div>
+    `);
+    $('[data-x]')?.addEventListener('click', closeModal);
+
+    $('#wd-test')?.addEventListener('click', async () => {
+      const url = $('#wd-url').value.trim();
+      const user = $('#wd-user').value.trim();
+      const pwd = $('#wd-pwd').value.trim();
+      const result = $('#wd-test-result');
+      if (!url || !user) { result.textContent = LANG==='zh' ? '请填写 URL 和用户名' : 'URL and username required'; result.style.color = '#fda293'; return; }
+      result.textContent = '…'; result.style.color = 'var(--text-3)';
+      try {
+        const payload: any = { provider: 'webdav', url, username: user };
+        if (pwd) payload.password = pwd;
+        const r = await api('/api/admin/storage/test', { method: 'POST', body: JSON.stringify(payload) });
+        if (r.ok) {
+          result.textContent = `✓ ${esc(t('storageBackendConnected'))} (${r.entries_found ?? 0} entries)`;
+          result.style.color = '#6ee7b7';
+        } else {
+          result.textContent = `✗ ${esc(t('storageBackendConnectFail'))}: ${r.message || r.error || ''}`;
+          result.style.color = '#fda293';
+        }
+      } catch (e: any) {
+        result.textContent = `✗ ${esc(t('storageBackendConnectFail'))}: ${e?.message ?? ''}`;
+        result.style.color = '#fda293';
+      }
+    });
+
+    $('#wd-save')?.addEventListener('click', async () => {
+      const url = $('#wd-url').value.trim().replace(/\/+$/, '');
+      const user = $('#wd-user').value.trim();
+      const pwdVal = $('#wd-pwd').value.trim();
+      const body: any = {
+        storage_provider: 'webdav',
+        storage_webdav_url: url,
+        storage_webdav_username: user,
+      };
+      if (pwdVal === '') {
+        body.storage_webdav_password = '__keep__';
+      } else {
+        body.storage_webdav_password = pwdVal;
+      }
+      await api('/api/admin/settings', { method: 'PUT', body: JSON.stringify(body) });
+      closeModal();
+      toast(t('saved'));
+      loadSettings();
+    });
   });
 
   // ═══════════════════════════════════
