@@ -257,6 +257,10 @@ h1 { font-size: 21px; font-weight: 700; letter-spacing: -.02em; word-break: brea
 </a>
 
 <script>
+/* ── 激活码绑定工具（全局可见，boot/triggerDownload/wireUnlock 都要用到） ── */
+function getBoundCode(){ try { return localStorage.getItem('r2pan_code')?.trim().toUpperCase() || null; } catch { return null; } }
+function setBoundCode(c){ try { if(c) localStorage.setItem('r2pan_code', c.trim().toUpperCase()); else localStorage.removeItem('r2pan_code'); } catch {} }
+
 /* ═══════════ i18n ═══════════ */
 const I18N = {
   zh: {
@@ -652,8 +656,7 @@ function render(d, siteName, oauthErr, oauthProviders){
   if(d.needs_password && $('#pw')) wireUnlock(d, ts, tsEnabled, tsOnDownload, oauthEnabled, oauthAuthed, oauthProviders);
 
   // ═══════ 激活码浮动按钮 & 弹窗 ═══════
-  function getBoundCode(){ try { return localStorage.getItem('r2pan_code')?.trim().toUpperCase() || null; } catch { return null; } }
-  function setBoundCode(c){ try { if(c) localStorage.setItem('r2pan_code', c.trim().toUpperCase()); else localStorage.removeItem('r2pan_code'); } catch {} }
+  // getBoundCode / setBoundCode 已提升到脚本顶层作用域
 
   // 更新浮动按钮上的绑定状态 badge
   function updateCodeFloatBadge(){
