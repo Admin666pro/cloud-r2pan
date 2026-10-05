@@ -352,15 +352,6 @@ export async function handleDownload(
   if (row.max_downloads && row.download_count >= row.max_downloads) return errorPage(req, 410, { zh: "下载次数已达上限", en: "Download Limit Reached" },
     { zh: `该资源允许下载 ${row.max_downloads} 次，名额已用完。`, en: `Download limit (${row.max_downloads}) reached.` });
 
-  if (row.max_downloads) {
-    const r = await env.db.prepare(
-      `UPDATE shares SET download_count = download_count + 1 WHERE id = ?1 AND download_count < ?2`
-    ).bind(token, row.max_downloads).run();
-    if ((r.meta.changes ?? 0) === 0)
-      return errorPage(req, 410, { zh: "下载次数已达上限", en: "Download Limit Reached" },
-        { zh: `名额已用完。`, en: `Quota used up.` });
-  }
-
   if (row.password_hash && !(await verifyShareToken(env, token, new URL(req.url).search))) {
     return errorPage(req, 403, { zh: "需要访问密码", en: "Password Required" },
       { zh: "该分享受密码保护。", en: "This share is password-protected." });
@@ -431,7 +422,22 @@ export async function handleDownload(
     }
   }
 
-  return streamFile(req, env, ctx, row, token, "share");
+  // 所有校验（密码/OAuth/Turnstile/流量/IP）都通过后，才原子预留下载名额。
+  // HEAD 仅探测可用性，不预留。预留成功但后续交付失败时由 streamFile 回退。
+  const isHead = req.method === "HEAD";
+  let reservedShare = false;
+  if (row.max_downloads && !isHead) {
+    const r = await env.db.prepare(
+      `UPDATE shares SET download_count = download_count + 1 WHERE id = ?1 AND download_count < ?2`
+    ).bind(token, row.max_downloads).run();
+    if ((r.meta.changes ?? 0) === 0)
+      return errorPage(req, 410, { zh: "下载次数已达上限", en: "Download Limit Reached" },
+        { zh: `名额已用完。`, en: `Quota used up.` });
+    reservedShare = true;
+  }
+
+  return streamFile(req, env, ctx, row, token, "share",
+    reservedShare ? { reservedTable: "shares", reservedToken: token } : undefined);
 }
 
 /**
@@ -490,15 +496,6 @@ export async function handleDirectDownload(
   if (row.max_downloads && row.download_count >= row.max_downloads) return errorPage(req, 410, { zh: "下载次数已达上限", en: "Download Limit Reached" },
     { zh: `名额已用完。`, en: `Quota used up.` });
 
-  if (row.max_downloads) {
-    const r = await env.db.prepare(
-      `UPDATE direct_links SET download_count = download_count + 1 WHERE id = ?1 AND download_count < ?2`
-    ).bind(token, row.max_downloads).run();
-    if ((r.meta.changes ?? 0) === 0)
-      return errorPage(req, 410, { zh: "下载次数已达上限", en: "Download Limit Reached" },
-        { zh: `名额已用完。`, en: `Quota used up.` });
-  }
-
   {
     const whitelisted = isAdminWhitelisted(ip, settings.adminIps);
     const usingCode = !!codeRow;
@@ -532,7 +529,21 @@ export async function handleDirectDownload(
     }
   }
 
-  return streamFile(req, env, ctx, row, token, "direct");
+  // 所有校验通过后才原子预留下载名额；HEAD 不预留，失败由 streamFile 回退
+  const isHead = req.method === "HEAD";
+  let reservedShare = false;
+  if (row.max_downloads && !isHead) {
+    const r = await env.db.prepare(
+      `UPDATE direct_links SET download_count = download_count + 1 WHERE id = ?1 AND download_count < ?2`
+    ).bind(token, row.max_downloads).run();
+    if ((r.meta.changes ?? 0) === 0)
+      return errorPage(req, 410, { zh: "下载次数已达上限", en: "Download Limit Reached" },
+        { zh: `名额已用完。`, en: `Quota used up.` });
+    reservedShare = true;
+  }
+
+  return streamFile(req, env, ctx, row, token, "direct",
+    reservedShare ? { reservedTable: "direct_links", reservedToken: token } : undefined);
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -549,18 +560,41 @@ interface StreamFileRow {
   download_name?: string | null;
 }
 
+/** 调用方在进入流式输出前已原子预留的下载次数（失败时需回退） */
+interface StreamFileOpts {
+  reservedTable?: "shares" | "direct_links";
+  reservedToken?: string;
+}
+
 async function streamFile(
   req: Request,
   env: Env,
   ctx: ExecutionContext,
   row: StreamFileRow,
   token: string,
-  kind: "share" | "direct"
+  kind: "share" | "direct",
+  opts?: StreamFileOpts
 ): Promise<Response> {
   const ip = clientIp(req);
   const ua = req.headers.get("user-agent") ?? "";
   const country = req.headers.get("cf-ipcountry") ?? "";
   const settings = await getSettings(env);
+
+  // HEAD 请求只回元数据，不计下载次数 / 流量 / 激活码额度
+  const isHead = req.method === "HEAD";
+
+  /** 下载未能真正交付时，把预留下的名额回退，避免"白扣一次" */
+  const refundReservation = () => {
+    if (!opts?.reservedTable || !opts?.reservedToken) return;
+    const table = opts.reservedTable === "shares" ? "shares" : "direct_links";
+    ctx.waitUntil(
+      env.db
+        .prepare(`UPDATE ${table} SET download_count = download_count - 1 WHERE id = ?1 AND download_count > 0`)
+        .bind(opts.reservedToken)
+        .run()
+        .catch(() => {})
+    );
+  };
 
   const urlCode = new URL(req.url).searchParams.get("code");
   const headerCode = req.headers.get("x-activation-code");
@@ -574,12 +608,15 @@ async function streamFile(
     obj = await st.get(row.key, range ? { offset: range.offset, length: range.length } : undefined);
   } catch (err: any) {
     console.error("[download] storage error:", err);
+    refundReservation();
     return errorPage(req, 502, { zh: "存储服务错误", en: "Storage Error" },
       { zh: "无法从存储后端读取文件。", en: "Cannot read file from storage." });
   }
-  if (!obj)
+  if (!obj) {
+    refundReservation();
     return errorPage(req, 404, { zh: "文件不存在", en: "File Not Found" },
       { zh: "文件可能已被删除。", en: "File may have been deleted." });
+  }
 
   const headers = new Headers();
   headers.set("content-type", obj.contentType);
@@ -596,45 +633,47 @@ async function streamFile(
     headers.set("content-range", `bytes ${range.offset}-${range.offset + servedLen - 1}/${row.size}`);
   }
 
-  // 后台记录
-  const bytes = servedLen;
-  const codeId = codeRow ? codeRow.code : null;
-  ctx.waitUntil(
-    (async () => {
-      const { browser, os } = parseUA(ua);
+  // 后台记录（HEAD 不记：无实际字节交付，避免污染流量/额度统计）
+  if (!isHead) {
+    const bytes = servedLen;
+    const codeId = codeRow ? codeRow.code : null;
+    ctx.waitUntil(
+      (async () => {
+        const { browser, os } = parseUA(ua);
 
-      if (env.analytics) {
-        try {
-          const latitude = req.headers.get("cf-ip-latitude") ?? "";
-          const longitude = req.headers.get("cf-ip-longitude") ?? "";
-          env.analytics.writeDataPoint({
-            blobs: [
-              country, row.name, browser, os, token,
-              codeId ?? "none", latitude, longitude,
-              settings.storageProvider || "r2",
-            ],
-            doubles: [bytes, 1],
-            indexes: [token],
-          });
-        } catch { /* ignore */ }
-      }
-
-      await env.db.prepare(
-        `INSERT INTO download_logs(share_id, file_id, file_name, ip, ua, browser, os, country, bytes, created_at, activation_code)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
-      )
-        // 直链也记 download_logs —— share_id 字段存 direct link token 方便追踪
-        .bind(token, row.file_id, row.name, ip, ua.slice(0, 500), browser, os, country, bytes, Date.now(), codeId)
-        .run();
-      await addTraffic(env, bytes);
-      if (codeRow) {
-        const dr = await deductQuota(env, codeRow, bytes);
-        if (!dr.ok) {
-          console.warn(`[code-decline] code=${codeRow.code} reason=${dr.reason} msg=${dr.message}`);
+        if (env.analytics) {
+          try {
+            const latitude = req.headers.get("cf-ip-latitude") ?? "";
+            const longitude = req.headers.get("cf-ip-longitude") ?? "";
+            env.analytics.writeDataPoint({
+              blobs: [
+                country, row.name, browser, os, token,
+                codeId ?? "none", latitude, longitude,
+                settings.storageProvider || "r2",
+              ],
+              doubles: [bytes, 1],
+              indexes: [token],
+            });
+          } catch { /* ignore */ }
         }
-      }
-    })()
-  );
 
-  return new Response(obj.body, { status: range ? 206 : 200, headers });
+        await env.db.prepare(
+          `INSERT INTO download_logs(share_id, file_id, file_name, ip, ua, browser, os, country, bytes, created_at, activation_code)
+           VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
+        )
+          // 直链也记 download_logs —— share_id 字段存 direct link token 方便追踪
+          .bind(token, row.file_id, row.name, ip, ua.slice(0, 500), browser, os, country, bytes, Date.now(), codeId)
+          .run();
+        await addTraffic(env, bytes);
+        if (codeRow) {
+          const dr = await deductQuota(env, codeRow, bytes);
+          if (!dr.ok) {
+            console.warn(`[code-decline] code=${codeRow.code} reason=${dr.reason} msg=${dr.message}`);
+          }
+        }
+      })()
+    );
+  }
+
+  return new Response(isHead ? null : obj.body, { status: range ? 206 : 200, headers });
 }
