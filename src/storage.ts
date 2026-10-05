@@ -162,12 +162,15 @@ function buildCanonicalRequest(
   headers: Record<string, string>,
   bodyHash: string
 ): { canonical: string; signedHeaders: string } {
-  const sortedHeaderNames = Object.keys(headers)
-    .map((k) => k.toLowerCase())
-    .sort();
+  // SigV4 要求 header 名小写并按其排序。原实现用小写名去索引原始大小写的 headers，
+  // 导致 headers["host"] 等恒为 undefined 并抛 TypeError（签名链路整体不可用）。
+  // 这里先归一化为「小写名 → 值」映射，再排序、取值，确保大小写无关。
+  const normalized: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) normalized[k.toLowerCase()] = v;
+  const sortedHeaderNames = Object.keys(normalized).sort();
   const signedHeaders = sortedHeaderNames.join(";");
 
-  const headerLines = sortedHeaderNames.map((name) => `${name}:${headers[name.trim()]!.trim()}\n`).join("");
+  const headerLines = sortedHeaderNames.map((name) => `${name}:${normalized[name].trim()}\n`).join("");
 
   // 规范化 query string
   let canonicalQuery = "";
