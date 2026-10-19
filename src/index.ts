@@ -4,6 +4,8 @@ import { parseUA } from "./ua";
 import { handleAdminApi } from "./admin";
 import { handleDownload, handleDirectDownload, handleShareInfo, handleVerify, handlePreviewOpen, handlePreviewRaw, handlePreviewZip } from "./public";
 import { serveAdminPage, serveSharePage, serveMarketPage, errorPage } from "./pages";
+// 全球分布地球仪的内置地球贴图（二进制模块，见 wrangler 的 Data 规则）
+import earthDayTexture from "./assets/earth-day.jpg";
 import {
   handleOAuthStart,
   handleOAuthCallback,
@@ -113,6 +115,18 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     const s = await getSettings(env);
     const target = s.homeRedirectMarket ? "/market" : "/admin";
     return Response.redirect(new URL(target, url).toString(), 302);
+  }
+
+  // 全球分布地球仪的内置地球贴图 —— 同源提供，不依赖外部 CDN。
+  // 外部 CDN 在部分网络环境会加载失败，echarts-gl 会退回渲染成纯白色球体（看起来像月亮）。
+  if (path === "/assets/earth-day.jpg" && (req.method === "GET" || req.method === "HEAD")) {
+    return new Response(earthDayTexture, {
+      headers: {
+        "content-type": "image/jpeg",
+        // 内容随代码内置、不会变化，可长效强缓存
+        "cache-control": "public, max-age=31536000, immutable",
+      },
+    });
   }
 
   // 管理后台页面（/admin/apple 是隐藏的 Apple 玻璃风）

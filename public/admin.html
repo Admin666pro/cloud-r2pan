@@ -3424,11 +3424,11 @@ async function loadGlobal(){
       }
     },
     globe: {
-      // 纹理用 CORS 友好的 CDN（jsdelivr 返回 access-control-allow-origin: *）。
-      // echarts-gl 以 crossOrigin=anonymous 加载纹理，缺少 CORS 头会导致 WebGL 贴图失败、地球变纯色球。
-      baseTexture: 'https://cdn.jsdelivr.net/gh/vasturiano/three-globe/example/img/earth-dark.jpg',
-      shading: 'color',
-      environment: 'auto',
+      // 贴图走本站 /assets/earth-day.jpg —— 由 Worker 内置并同源提供。
+      // 之前用外部 CDN：部分网络环境下载失败时，echarts-gl 会退回渲染成纯白色球体（看着像月亮）。
+      baseTexture: '/assets/earth-day.jpg',
+      shading: 'color',      // 全表面均匀受光，整颗地球的陆地/海洋都清晰可见（不会有一半是暗的）
+      environment: 'none',   // 不要天空盒 / 环境贴图，只要地球本身
       atmosphere: { show: true, color: '#3b82f6', glowPower: 4, innerGlowPower: 2 },
       viewControl: {
         autoRotate: false,       // 可随意拖动，松手后保持当前视角

@@ -15,3 +15,14 @@ compatibility_date = "2025-01-01"
 binding = "db"
 database_name = "cloud-r2pan"
 database_id = "local-db"
+
+# 资源模块规则：HTML 作为文本导入；内置地球贴图作为二进制导入
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
+[[rules]]
+type = "Data"
+globs = ["**/*.jpg"]
+fallthrough = true
