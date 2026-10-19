@@ -1,5 +1,5 @@
 import type { Env, ShareWithFile, DirectLinkWithFile } from "./types";
-import { getSettings, addTraffic } from "./settings";
+import { getSettings, addTraffic, consumePreviewQuota } from "./settings";
 import { parseUA } from "./ua";
 import { clientIp, isAdminWhitelisted } from "./auth";
 import { findCodeByString, checkCodeUsable, activateCodeIfNeeded, deductQuota, formatCodeStatus } from "./codes";
@@ -161,8 +161,9 @@ async function verifyShareToken(env: Env, token: string, query: string): Promise
 }
 
 /* ═══════════ 在线预览 ═══════════
- * 预览次数独立于下载次数（settings.previewLimit，默认 4）。
- * 打开一次预览 = 计 1 次；预览原始流用短时 HMAC 令牌（pv）授权，避免被反复刷。
+ * 预览次数为「全站共用」的月度总额度（settings.previewLimit），所有分享共享同一份，
+ * 跨月自动重置。打开一次预览 = 计 1 次；预览原始流用短时 HMAC 令牌（pv）授权，
+ * 避免被反复刷。
  */
 
 /** 可预览类型 */
@@ -190,10 +191,10 @@ export function previewKind(mime: string, name: string): PreviewKind {
   return "none";
 }
 
-/** 计算某分享的预览上限与已用次数（limit<=0 表示不限） */
-function previewUsage(row: ShareWithFile, globalLimit: number): { limit: number; used: number; remaining: number; maxed: boolean } {
-  const used = row.preview_count ?? 0;
-  const limit = row.max_previews === null || row.max_previews === undefined ? globalLimit : row.max_previews;
+/** 计算全局月度预览额度用量（limit<=0 表示不限） */
+function globalPreviewUsage(settings: { previewLimit: number; previewUsed: number }): { limit: number; used: number; remaining: number; maxed: boolean } {
+  const limit = settings.previewLimit;
+  const used = settings.previewUsed;
   const maxed = limit > 0 && used >= limit;
   const remaining = limit > 0 ? Math.max(0, limit - used) : -1; // -1 = 不限
   return { limit, used, remaining, maxed };
@@ -295,7 +296,7 @@ export async function handleShareInfo(req: Request, env: Env, token: string): Pr
     },
     preview: (() => {
       const kind = previewKind(row.mime, row.name);
-      const usage = previewUsage(row, settings.previewLimit);
+      const usage = globalPreviewUsage(settings);
       return {
         enabled: kind !== "none" && status === "ok",
         kind,
@@ -718,8 +719,9 @@ async function streamFile(
  *   GET /s/:token/preview/raw   —— 内联流式返回原始文件（支持 Range，供图片/视频/音频/PDF/文本渲染）
  *   GET /s/:token/preview/zip   —— 解析 ZIP 中央目录，返回压缩包内部文件结构
  *
- * 与下载完全独立：预览次数走 shares.preview_count / max_previews（默认取全局 previewLimit），
- * 不写入 download_logs、不消耗下载次数；但会累计月度流量（带宽成本一致）。
+ * 与下载完全独立：预览次数为「全站共用」的月度总额度（settings.previewLimit），
+ * 所有分享共享同一份并跨月自动重置；不写入 download_logs、不消耗下载次数；
+ * 但会累计月度流量（带宽成本一致），且预览流同样受月度流量限额约束。
  * ════════════════════════════════════════════════════════════════════ */
 
 /** 读取存储对象的一段字节（用于解析 ZIP 中央目录）；失败返回 null */
@@ -830,9 +832,9 @@ async function parseZipEntries(env: Env, key: string, size: number): Promise<{ e
 }
 
 /**
- * GET /s/:token/preview —— 打开预览（计 1 次）。
+ * GET /s/:token/preview —— 打开预览（全站月度总额度计 1 次）。
  * 门禁与下载一致：撤销/过期/满额/密码/OAuth/Turnstile/流量限额/激活码。
- * 成功后原子自增 preview_count，超限则拒绝（自动停止预览）。
+ * 成功后原子消费一次全站预览额度，超限则拒绝（自动停止预览）。
  */
 export async function handlePreviewOpen(req: Request, env: Env, token: string): Promise<Response> {
   const settings = await getSettings(env);
@@ -884,30 +886,17 @@ export async function handlePreviewOpen(req: Request, env: Env, token: string): 
     }
   }
 
-  // 预览次数限制 —— 原子自增，超限即止（防止浪费）
-  const effLimit = row.max_previews === null || row.max_previews === undefined ? settings.previewLimit : row.max_previews;
-  if (effLimit > 0) {
-    const r = await env.db
-      .prepare("UPDATE shares SET preview_count = preview_count + 1 WHERE id = ?1 AND preview_count < ?2")
-      .bind(token, effLimit)
-      .run();
-    if ((r.meta.changes ?? 0) === 0) {
-      return json(
-        { ok: false, error: "preview_limit_reached", limit: effLimit, used: effLimit, remaining: 0 },
-        { status: 429 }
-      );
-    }
-  } else {
-    const r = await env.db.prepare("UPDATE shares SET preview_count = preview_count + 1 WHERE id = ?1").bind(token).run();
-    if ((r.meta.changes ?? 0) === 0) {
-      // 行已不存在 —— 极端并发下分享被删
-      return json({ ok: false, error: "not_found" }, { status: 404 });
-    }
+  // 全站月度预览总额度 —— 所有分享共用同一份，原子自增，超限即止（跨月自动重置）
+  const quota = await consumePreviewQuota(env, settings.previewLimit);
+  if (!quota.ok) {
+    return json(
+      { ok: false, error: "preview_limit_reached", limit: quota.limit, used: quota.limit, remaining: 0 },
+      { status: 429 }
+    );
   }
 
   const pv = await issuePreviewToken(env, token);
-  const usedAfter = (row.preview_count ?? 0) + 1;
-  const remaining = effLimit > 0 ? Math.max(0, effLimit - usedAfter) : -1;
+  const remaining = quota.limit > 0 ? Math.max(0, quota.limit - quota.used) : -1;
   const codeSuffix = codeParam ? `&code=${encodeURIComponent(codeParam)}` : "";
   return json({
     ok: true,
@@ -915,8 +904,8 @@ export async function handlePreviewOpen(req: Request, env: Env, token: string): 
     name: row.download_name || row.name,
     size: row.size,
     mime: row.mime,
-    limit: effLimit,
-    used: usedAfter,
+    limit: quota.limit,
+    used: quota.used,
     remaining,
     raw_url: `/s/${token}/preview/raw?pv=${encodeURIComponent(pv)}${codeSuffix}`,
     zip_url: kind === "zip" ? `/s/${token}/preview/zip?pv=${encodeURIComponent(pv)}` : null,
@@ -935,6 +924,24 @@ export async function handlePreviewRaw(
   const url = new URL(req.url);
   if (!(await verifyPreviewToken(env, token, url.search))) {
     return json({ error: "unauthorized" }, { status: 403 });
+  }
+
+  // 分享状态门禁：预览令牌有效期 1h，期间分享可能被撤销/过期/满额，必须一并拦截
+  if (row.revoked) return json({ error: "gone" }, { status: 410 });
+  if (row.expires_at && row.expires_at < Date.now()) return json({ error: "expired" }, { status: 410 });
+  if (row.max_downloads && row.download_count >= row.max_downloads) return json({ error: "maxed" }, { status: 410 });
+
+  const codeParam = (url.searchParams.get("code") || req.headers.get("x-activation-code") || "").trim().toUpperCase() || null;
+  const codeRow = codeParam ? await findCodeByString(env, codeParam) : null;
+
+  // 月度流量限额：预览同样消耗带宽，超限时必须停止，否则持有有效令牌可持续刷流量
+  {
+    const settings = await getSettings(env);
+    const whitelisted = isAdminWhitelisted(clientIp(req), settings.adminIps);
+    const usingCode = !!codeRow && checkCodeUsable(codeRow as any).ok;
+    if (!whitelisted && !usingCode && settings.trafficLimitBytes > 0 && settings.trafficUsedBytes >= settings.trafficLimitBytes) {
+      return json({ error: "traffic_exceeded" }, { status: 503 });
+    }
   }
 
   const range = parseRange(req.headers.get("range"), row.size);
@@ -962,16 +969,12 @@ export async function handlePreviewRaw(
   if (range) headers.set("content-range", `bytes ${range.offset}-${range.offset + servedLen - 1}/${row.size}`);
 
   // 预览同样消耗带宽 → 计入月度流量（若带了有效激活码则扣激活码额度），但不写 download_logs
-  const codeParam = (url.searchParams.get("code") || req.headers.get("x-activation-code") || "").trim().toUpperCase() || null;
   ctx.waitUntil(
     (async () => {
       await addTraffic(env, servedLen);
-      if (codeParam) {
-        const codeRow = await findCodeByString(env, codeParam);
-        if (codeRow) {
-          const dr = await deductQuota(env, codeRow, servedLen);
-          if (!dr.ok) console.warn(`[preview-code-decline] code=${codeRow.code} reason=${dr.reason}`);
-        }
+      if (codeRow) {
+        const dr = await deductQuota(env, codeRow, servedLen);
+        if (!dr.ok) console.warn(`[preview-code-decline] code=${codeRow.code} reason=${dr.reason}`);
       }
     })()
   );
@@ -983,6 +986,8 @@ export async function handlePreviewRaw(
 export async function handlePreviewZip(req: Request, env: Env, token: string): Promise<Response> {
   const row = await getShare(env, token);
   if (!row) return json({ error: "not_found" }, { status: 404 });
+  if (row.revoked) return json({ error: "gone" }, { status: 410 });
+  if (row.expires_at && row.expires_at < Date.now()) return json({ error: "expired" }, { status: 410 });
   if (previewKind(row.mime, row.name) !== "zip") return json({ ok: false, error: "not_zip" }, { status: 415 });
   if (!(await verifyPreviewToken(env, token, new URL(req.url).search))) {
     return json({ error: "unauthorized" }, { status: 403 });

@@ -670,10 +670,7 @@ const I18N = {
     downloadNameHint: '访客下载时看到的文件名，隐藏真实路径中的敏感信息。',
     maxDownloadsLabel: '下载次数上限（留空或 0 = 不限）', unlimitedPlaceholder: '不限',
     maxTip: '达到上限后链接自动失效。单 IP 重复下载限制由「设置」统一控制。',
-    maxPreviewsLabel: '在线预览次数上限（留空或 0 = 跟随全局）', maxPreviewsFollowPh: '跟随全局',
-    maxPreviewsTip: '独立于下载次数。达到上限后该分享自动停止在线预览，防止反复预览浪费流量。',
-    previewLimit: '在线预览次数上限', previewLimitD: '每个分享默认可在线预览的次数（默认 4）。设为 0 表示不限制；每个分享也可单独覆盖此值。',
-    colPreviews: '预览量',
+    previewLimit: '在线预览月度总额度', previewLimitD: '全站所有分享共用的月度预览总次数（默认 4），用完即停止预览、下个月自动重置。设为 0 表示不限制。本月已用 {used} 次。',
     showQr: '二维码', qrTitle: '扫码打开', qrHint: '用手机相机扫描二维码即可打开此链接', qrLoading: '生成中…', qrFail: '二维码生成失败',
     generate: '生成链接', shareCreated: '分享链接已创建 ✨', shareCreatedSub: '复制下面的链接发给需要的人',
     sharePageLink: '分享页（访客先看到密码/验证页）',
@@ -1106,10 +1103,7 @@ const I18N = {
     downloadNameHint: 'The filename visitors see when they download. Useful for hiding sensitive info in original paths.',
     maxDownloadsLabel: 'Max downloads (empty or 0 = unlimited)', unlimitedPlaceholder: 'Unlimited',
     maxTip: 'The link expires when the cap is reached. Per-IP duplicate limits are controlled in Settings.',
-    maxPreviewsLabel: 'Online preview limit (empty or 0 = follow global)', maxPreviewsFollowPh: 'Follow global',
-    maxPreviewsTip: 'Independent of download count. Online preview stops automatically once the cap is reached, preventing wasted previews.',
-    previewLimit: 'Online preview limit', previewLimitD: 'Default number of online previews per share (default 4). Set 0 for unlimited; each share can also override this.',
-    colPreviews: 'Previews',
+    previewLimit: 'Monthly preview quota', previewLimitD: 'Monthly total online previews shared by all shares (default 4). Preview stops once exhausted and auto-resets next month. Set 0 for unlimited. Used this month: {used}.',
     showQr: 'QR Code', qrTitle: 'Scan to open', qrHint: 'Scan the QR code with your phone camera to open this link', qrLoading: 'Generating…', qrFail: 'Failed to generate QR code',
     generate: 'Generate Link', shareCreated: 'Share link created ✨', shareCreatedSub: 'Copy the link below and share it',
     sharePageLink: 'Share page (visitors see password/verification first)',
@@ -2421,11 +2415,6 @@ function openShareModal(fileId){
       <input type="number" id="sh-max" min="0" placeholder="${esc(t('unlimitedPlaceholder'))}">
       <div class="tip">${esc(t('maxTip'))}</div>
     </div>
-    <div class="field">
-      <label>${esc(t('maxPreviewsLabel'))}</label>
-      <input type="number" id="sh-maxpv" min="0" placeholder="${esc(t('maxPreviewsFollowPh'))}">
-      <div class="tip">${esc(t('maxPreviewsTip'))}</div>
-    </div>
     <div class="actions">
       <button class="btn" data-x>${esc(t('cancel'))}</button>
       <button class="btn primary" id="sh-create">${esc(t('generate'))}</button>
@@ -2434,11 +2423,10 @@ function openShareModal(fileId){
   $('#sh-create').onclick = async () => {
     const exp = Number($('#sh-exp').value) || null;
     const max = Number($('#sh-max').value) || null;
-    const maxpv = Number($('#sh-maxpv').value) || null;
     const password = $('#sh-pwd').value.trim() || null;
     const download_name = $('#sh-dlname').value.trim() || null;
     try{
-      const r = await api('/api/admin/shares', { method:'POST', body: JSON.stringify({ file_id: fileId, expires_hours: exp, max_downloads: max, max_previews: maxpv, password, download_name }) });
+      const r = await api('/api/admin/shares', { method:'POST', body: JSON.stringify({ file_id: fileId, expires_hours: exp, max_downloads: max, password, download_name }) });
       const url = location.origin + r.url;
       openModal(`
         <h3>${esc(t('shareCreated'))}</h3>
@@ -2700,7 +2688,7 @@ async function loadShares(){
         <button class="btn sm" id="cleanup-shares">${esc(t('cleanup'))}</button></div>
       ${shares.length ? `
       <div style="overflow-x:auto"><table class="tbl">
-        <thead><tr><th>${esc(t('colFile'))}</th><th>${esc(t('colLink'))}</th><th>${esc(t('passwordCol'))}</th><th>${esc(t('colDownloads'))} / ${esc(t('colExpires'))}</th><th>${esc(t('colPreviews'))}</th><th>${esc(t('colCreated'))}</th><th>${esc(t('colExpires'))}</th><th>${esc(t('colStatus'))}</th><th style="width:130px">${esc(t('colActions'))}</th></tr></thead>
+        <thead><tr><th>${esc(t('colFile'))}</th><th>${esc(t('colLink'))}</th><th>${esc(t('passwordCol'))}</th><th>${esc(t('colDownloads'))} / ${esc(t('colExpires'))}</th><th>${esc(t('colCreated'))}</th><th>${esc(t('colExpires'))}</th><th>${esc(t('colStatus'))}</th><th style="width:130px">${esc(t('colActions'))}</th></tr></thead>
         <tbody>${shares.map(s => {
           const pw = s.has_password ? (s.password_plain || '') : null;
           return `
@@ -2711,7 +2699,6 @@ async function loadShares(){
               <button class="btn sm" data-pw="${s.id}" data-val="${esc(pw)}" style="padding:2px 8px;font-size:11px;margin-left:4px">👁</button>
               <button class="btn sm" data-cpw="${esc(pw)}" style="padding:2px 8px;font-size:11px">📋</button>` : `<span style="color:var(--text-3)">—</span>`}</td>
             <td class="num">${s.download_count} / ${s.max_downloads ?? '∞'}</td>
-            <td class="num">${s.preview_count ?? 0} / ${s.max_previews ?? '∞'}</td>
             <td class="num">${fmtTime(s.created_at)}</td>
             <td class="num">${s.expires_at ? fmtTime(s.expires_at) : esc(t('forever'))}</td>
             <td><span class="tag ${s.status}"><i></i>${esc(t(STATUS_KEY[s.status]))}</span></td>
@@ -4111,7 +4098,7 @@ async function loadSettings(){
     </div>
     <div class="glass group">
       <div class="row">
-        <div class="info"><div class="t">👁️ ${esc(t('previewLimit'))}</div><div class="d">${esc(t('previewLimitD'))}</div></div>
+        <div class="info"><div class="t">👁️ ${esc(t('previewLimit'))}</div><div class="d">${esc(t('previewLimitD', {used: s.preview_used ?? 0}))}</div></div>
         <input type="number" id="st-preview-limit" min="0" value="${s.preview_limit ?? 4}">
       </div>
     </div>

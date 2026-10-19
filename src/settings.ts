@@ -34,11 +34,15 @@ export interface Settings {
   /** 单 IP 对同一分享的最大下载次数，0 = 不限 */
   maxDownloadsPerIp: number;
   /**
-   * 全局「在线预览」次数上限（针对每个分享的预览次数，独立于下载次数）。
-   * 默认 4；分享级 max_previews 可覆盖（0 = 该分享不限）。
+   * 全站「在线预览」月度总额度（所有分享共用同一份，独立于下载次数）。
+   * 默认 4；0 = 不限。用完后所有分享都停止在线预览，直到下个月自动重置。
    * 达到上限后自动停止在线预览，防止流量浪费。
    */
   previewLimit: number;
+  /** 本月已用的在线预览总次数（全站共用） */
+  previewUsed: number;
+  /** 在线预览统计月份 YYYY-MM（跨月自动清零） */
+  previewMonth: string;
   /** 重复下载统计窗口（小时），0 = 永久 */
   countWindowHours: number;
   /** 超限后是否自动封禁 */
@@ -248,6 +252,8 @@ export const DEFAULT_SETTINGS: Settings = {
   trafficMonth: "",
   maxDownloadsPerIp: 2,
   previewLimit: 4,
+  previewUsed: 0,
+  previewMonth: "",
   countWindowHours: 24,
   autoBan: true,
   banHours: 24,
@@ -329,6 +335,15 @@ export async function getSettings(env: Env): Promise<Settings> {
     trafficMonth = currentMonth;
   }
 
+  // 预览额度与流量同周期，跨月同样自动清零（否则"上月用完→本月锁死"）
+  const storedPreviewMonth = map.get("preview_month") ?? "";
+  let previewUsed = toInt(map.get("preview_used"), 0);
+  let previewMonth = storedPreviewMonth;
+  if (storedPreviewMonth && storedPreviewMonth !== currentMonth && previewUsed > 0) {
+    previewUsed = 0;
+    previewMonth = currentMonth;
+  }
+
   // ── 管理员第三方 OAuth 配置 ──────────────────────────────
   // 优先读新的聚合键 admin_oauth；为空时把旧的单一 GitHub 键读侧迁移成 GitHub 条目，
   // 老部署无需手动改库即可继续使用原 GitHub 绑定与配置。
@@ -360,6 +375,8 @@ export async function getSettings(env: Env): Promise<Settings> {
     trafficMonth,
     maxDownloadsPerIp: toInt(map.get("max_downloads_per_ip"), DEFAULT_SETTINGS.maxDownloadsPerIp),
     previewLimit: toInt(map.get("preview_limit"), DEFAULT_SETTINGS.previewLimit),
+    previewUsed,
+    previewMonth,
     countWindowHours: toInt(map.get("count_window_hours"), DEFAULT_SETTINGS.countWindowHours),
     autoBan: (map.get("auto_ban") ?? "1") === "1",
     banHours: toInt(map.get("ban_hours"), DEFAULT_SETTINGS.banHours),
@@ -431,21 +448,12 @@ export async function updateSettings(env: Env, patch: Partial<Record<string, str
 /**
  * 记录一次下载产生的流量（跨月自动重置）。
  *
- * ── Bug #1 彻底修复（上一次修复只消除了 read-compute-write，
- *    但在 00:00 跨月瞬间仍存在竞态） ──
+ * ── 关键点：跨月判断与写入必须在同一个 batch 里，且「清零」要排在「写入当月」之前 ──
  *
- * 根因：SELECT 检测 crossMonth → JS 分支选 SQL → batch 写入，
- * 三步之间没有事务隔离。并发请求同时读到"上月"就都走 crossMonth 分支，
- * 最后一个覆盖前值，丢流量。
- *
- * 方案：
- *   1. 跨月判断完全内联到单个 UPDATE 语句的 SQL 子查询里，
- *      数据库自己读 traffic_month 做 CASE WHEN，不再经过 JS 分支
- *   2. 三个 SQL 包在 transaction batch 中，保证原子执行
- *   3. 完全去掉前置 SELECT，消除竞态窗口
- *
- * 无论多少并发，同一事务内 CASE WHEN 读到的 traffic_month 是一致的，
- * 要么全部累加（同月），要么全部重置（跨月）。
+ * 旧实现的顺序是「先写 traffic_month = 当月，再判断」，于是 CASE WHEN
+ * (traffic_month = 当月) 永远为真 → 旧值被原样累加，跨月从未真正清零。
+ * 现在改为：① 若已存月份 ≠ 当月则清零 → ② 累加 → ③ 写入当月。
+ * 三步在同一事务内串行执行，并发也不会丢流量。
  */
 export async function addTraffic(env: Env, bytes: number): Promise<void> {
   const now = new Date();
@@ -453,28 +461,76 @@ export async function addTraffic(env: Env, bytes: number): Promise<void> {
   const day = now.toISOString().slice(0, 10);
 
   await env.db.batch([
-    // ① 同步 traffic_month 到当月（幂等：同月时 value 不变）
+    // ① 跨月清零（仅当已存月份存在且与当月不同）
+    env.db.prepare(
+      `UPDATE settings SET value = '0'
+       WHERE key = 'traffic_used_bytes'
+         AND EXISTS (SELECT 1 FROM settings WHERE key = 'traffic_month' AND value <> ?1)`
+    ).bind(month),
+
+    // ② 累加流量：此时计数器要么是本月旧值，要么已被 ① 清零
+    env.db.prepare(
+      `INSERT INTO settings(key, value) VALUES('traffic_used_bytes', ?1)
+       ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + ?2 AS TEXT)`
+    ).bind(String(bytes), bytes),
+
+    // ③ 记录当月
     env.db.prepare(
       "INSERT INTO settings(key, value) VALUES('traffic_month', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     ).bind(month),
 
-    // ② 更新 traffic_used_bytes —— 跨月逻辑完全内联在 SQL 里
-    //    同月：累加旧值；跨月：从 0 开始加
-    env.db.prepare(
-      // 注意：SQLite 不支持 `expr AS TEXT` 这种写法，必须用外层 CAST(... AS TEXT) 包裹整个加法表达式。
-      // 之前写成 `CAST(... AS INTEGER) + ?2 AS TEXT` 会导致 "near AS: syntax error"，使流量统计永远失败。
-      `UPDATE settings SET value = CAST(
-        CAST(CASE
-          WHEN (SELECT value FROM settings WHERE key = 'traffic_month') = ?1
-          THEN COALESCE((SELECT value FROM settings WHERE key = 'traffic_used_bytes'), '0')
-          ELSE '0'
-        END AS INTEGER) + ?2 AS TEXT)
-       WHERE key = 'traffic_used_bytes'`
-    ).bind(month, String(bytes)),
-
-    // ③ traffic_stats 每日汇总（原本就是原子累加，保持不变）
+    // ④ traffic_stats 每日汇总（原子累加）
     env.db.prepare(
       "INSERT INTO traffic_stats(day, bytes, downloads) VALUES(?1, ?2, 1) ON CONFLICT(day) DO UPDATE SET bytes = bytes + excluded.bytes, downloads = downloads + excluded.downloads"
     ).bind(day, bytes),
   ]);
+
+  invalidateSettingsCache();
+}
+
+/**
+ * 消费一次「在线预览」配额 —— 全站所有分享共用同一份月度总额度，跨月自动重置。
+ *
+ * 与 addTraffic 同样的思路：清零 → 条件自增 → 写当月，全部在一个 batch 里原子完成。
+ * 限量 > 0 时才做「已用 < 限量」的条件判断；超限时 changes = 0 → ok = false。
+ *
+ * @returns { ok, used, limit } —— used 为消费后的已用次数（不限量时为累计值）
+ */
+export async function consumePreviewQuota(
+  env: Env,
+  limit: number
+): Promise<{ ok: boolean; used: number; limit: number }> {
+  const month = new Date().toISOString().slice(0, 7);
+  const results = await env.db.batch([
+    // ① 确保计数行存在
+    env.db.prepare(
+      "INSERT INTO settings(key, value) VALUES('preview_used', '0') ON CONFLICT(key) DO NOTHING"
+    ),
+
+    // ② 跨月清零
+    env.db.prepare(
+      `UPDATE settings SET value = '0'
+       WHERE key = 'preview_used'
+         AND EXISTS (SELECT 1 FROM settings WHERE key = 'preview_month' AND value <> ?1)`
+    ).bind(month),
+
+    // ③ 条件自增：限量 = 0 时无条件累加；否则仅当已用 < 限量才 +1
+    env.db.prepare(
+      `UPDATE settings SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
+       WHERE key = 'preview_used' AND (?1 = 0 OR CAST(value AS INTEGER) < ?1)`
+    ).bind(limit),
+
+    // ④ 记录当月
+    env.db.prepare(
+      "INSERT INTO settings(key, value) VALUES('preview_month', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).bind(month),
+  ]);
+
+  const incChanges = (results[2] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0;
+  const row = await env.db
+    .prepare("SELECT value FROM settings WHERE key = 'preview_used'")
+    .first<{ value: string }>();
+  const used = toInt(row?.value, 0);
+  invalidateSettingsCache();
+  return { ok: incChanges > 0, used, limit };
 }

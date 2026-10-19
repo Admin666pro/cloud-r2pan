@@ -569,7 +569,6 @@ export async function handleAdminApi(
       file_id: string;
       expires_hours: number | null;
       max_downloads: number | null;
-      max_previews?: number | null;
       password: string | null;
       download_name?: string | null;
       is_market?: boolean;
@@ -583,9 +582,6 @@ export async function handleAdminApi(
       body.expires_hours && body.expires_hours > 0 ? Date.now() + body.expires_hours * 3600_000 : null;
     const maxDownloads =
       body.max_downloads && body.max_downloads > 0 ? Math.floor(body.max_downloads) : null;
-    // 预览次数上限：留空 / 0 = 用全局设置 preview_limit；>0 = 该分享专属值
-    const maxPreviews =
-      body.max_previews && body.max_previews > 0 ? Math.floor(body.max_previews) : null;
     const password =
       typeof body.password === "string" && body.password.trim() ? body.password.trim() : null;
     const passwordHash = password ? await hashPassword(password) : null;
@@ -600,10 +596,10 @@ export async function handleAdminApi(
       typeof body.market_desc === "string" && body.market_desc.trim() ? body.market_desc.trim() : null;
     const id = randomId(10);
     await env.db.prepare(
-      `INSERT INTO shares(id, file_id, created_at, expires_at, max_downloads, max_previews, password_hash, password_cipher, download_name, is_market, market_title, market_desc)
-       VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`
+      `INSERT INTO shares(id, file_id, created_at, expires_at, max_downloads, password_hash, password_cipher, download_name, is_market, market_title, market_desc)
+       VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
     )
-      .bind(id, body.file_id, Date.now(), expiresAt, maxDownloads, maxPreviews, passwordHash, passwordCipher, downloadName, isMarket, marketTitle, marketDesc)
+      .bind(id, body.file_id, Date.now(), expiresAt, maxDownloads, passwordHash, passwordCipher, downloadName, isMarket, marketTitle, marketDesc)
       .run();
     return json({ ok: true, id, url: `/s/${id}` }, 201);
   }
@@ -1220,6 +1216,7 @@ export async function handleAdminApi(
       traffic_limit_gb: s.trafficLimitBytes / 1024 ** 3,
       max_downloads_per_ip: s.maxDownloadsPerIp,
       preview_limit: s.previewLimit,
+      preview_used: s.previewUsed,
       count_window_hours: s.countWindowHours,
       auto_ban: s.autoBan,
       ban_hours: s.banHours,

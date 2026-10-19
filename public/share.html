@@ -676,7 +676,7 @@ function render(d, siteName, oauthErr, oauthProviders){
       <svg viewBox="0 0 24 24" fill="none"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>
       ${esc(t('previewOnline'))}
     </a>
-    <div class="hint">${esc(pvRemainTxt)}</div>`
+    <div class="hint" id="pv-remain">${esc(pvRemainTxt)}</div>`
     : (pv.enabled && pv.maxed ? `<div class="warn">${esc(t('previewLimitReached', { n: pv.limit }))}</div>` : '');
 
   // ── 二维码按钮 ──
@@ -912,6 +912,9 @@ function render(d, siteName, oauthErr, oauthProviders){
     }
 
     meta.innerHTML = `<span>${esc(j.limit > 0 ? t('previewRemaining', { n: j.remaining }) : t('previewRemainingInf'))}</span>`;
+    // 同步更新页面上的剩余次数，避免关闭/切标签回来后显示的还是初始值
+    const remainEl = document.getElementById('pv-remain');
+    if(remainEl) remainEl.textContent = j.limit > 0 ? t('previewRemaining', { n: j.remaining }) : t('previewRemainingInf');
 
     const rawUrl = j.raw_url;
     if(j.kind === 'image')      body.innerHTML = `<img src="${esc(rawUrl)}" alt="${esc(d.name)}">`;
