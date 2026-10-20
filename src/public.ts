@@ -148,6 +148,41 @@ function isByteProbe(req: Request, size: number): boolean {
   return !!r && r.offset === 0 && r.length === 1;
 }
 
+/**
+ * Range 语法合法、但起点已经越过文件末尾（或后缀长度为 0）→ 必须返回 416。
+ *
+ * 为什么不能像旧实现那样"解析失败就当整份下载"：下载器断点续传时若把本地已完成的
+ * 偏移发给服务端，服务端却回 200 + 整份文件，下载器会把它当成新数据追加到已有文件后，
+ * 得到一个**损坏的超大文件**；部分下载器则直接判定服务端不支持续传而放弃 —— 表现为
+ * "下载到一半就再也下不动了"。
+ */
+function isUnsatisfiableRange(header: string | null, size: number): boolean {
+  if (!header) return false;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!m || (m[1] === "" && m[2] === "")) return false;
+  if (m[1] === "") {
+    const n = Number(m[2]);
+    return !Number.isFinite(n) || n <= 0;
+  }
+  const offset = Number(m[1]);
+  return Number.isFinite(offset) && offset >= size;
+}
+
+/**
+ * 会话字节预算的「续传重叠余量」。
+ *
+ * 一次下载被中断后，客户端会从它"确定已收到"的偏移续传；而服务端在断流瞬间可能已经把
+ * 若干数据块读进响应缓冲区（计入了 bytes）。两者之间的差值是**重复发送**的字节，
+ * 若预算严格卡在 size，任何一次断线续传都会溢出 → 410，用户表现为"下到一半断了就再也下不了"。
+ *
+ * 余量限制在 2MB / 文件大小的 25% 以内：足够覆盖运行时缓冲与续传重叠，又不会让攻击者
+ * 白嫖出第二份完整文件（最多多拿 2MB）。
+ */
+function sessionBudget(size: number): number {
+  const cap = size > 0 ? size : 1;
+  return cap + Math.min(2 * 1024 * 1024, Math.ceil(cap / 4));
+}
+
 interface SessionClaim {
   /** 是否开启了新会话（= 需要占用下载名额 / 计次 / 写日志） */
   isNew: boolean;
@@ -155,6 +190,12 @@ interface SessionClaim {
   admitted: boolean;
   /** 本次请求是否**已经预占了一个名额**（失败回滚时要退还） */
   claimed: boolean;
+  /**
+   * 本次准入对应会话行的 created_at。
+   * 退还字节 / 退还会话时必须带上它做条件，否则一个**旧请求**迟到的退款
+   * 会扣到同一 (分享, IP) 后来新建的会话上，凭空制造免费预算。
+   */
+  sessionAt: number | null;
 }
 
 /**
@@ -191,7 +232,7 @@ async function claimSession(
   const now = Date.now();
   const fresh = now - DOWNLOAD_SESSION_MS; // created_at > fresh 才算"有效会话"
   const max = maxDownloads && maxDownloads > 0 ? Math.floor(maxDownloads) : 0; // 0 = 不限
-  const cap = size > 0 ? size : 1; // 空文件给 1 字节预算，避免 0 预算永远拒绝
+  const cap = sessionBudget(size); // 一份文件 + 续传重叠余量
   // 预算按「至少 1 字节」计：否则 0 字节文件（或 bytes=0-0 之外的 0 长 Range）永远满足
   // `bytes + 0 <= cap`，可以无限次被当作"续传"免费放行，max_downloads 对空文件失效。
   const need = Math.max(1, len);
@@ -203,7 +244,7 @@ async function claimSession(
     .run()
     .catch(() => {});
 
-  // ① 免费续传：已有被准入会话，且本次字节仍在「一份文件」预算内 → 原子预占字节
+  // ① 免费续传：已有被准入会话，且本次字节仍在「一份文件 + 重叠余量」预算内 → 原子预占字节
   const ext = await env.db
     .prepare(
       `UPDATE download_sessions SET created_at = ?3, bytes = bytes + ?5
@@ -212,7 +253,8 @@ async function claimSession(
     )
     .bind(id, ip, now, fresh, need, cap)
     .run();
-  if ((ext.meta.changes ?? 0) > 0) return { isNew: false, admitted: true, claimed: false };
+  if ((ext.meta.changes ?? 0) > 0)
+    return { isNew: false, admitted: true, claimed: false, sessionAt: now };
 
   // ② 先原子抢名额 —— 只有真正抢到名额的请求才有权重建会话。
   //    ⚠️ 旧实现是「先删掉同 (分享, IP) 的旧会话再插新会话」：一个并发的重复请求
@@ -246,7 +288,7 @@ async function claimSession(
         .bind(id)
         .run()
         .catch(() => {});
-      return { isNew: false, admitted: false, claimed: false };
+      return { isNew: false, admitted: false, claimed: false, sessionAt: null };
     }
     // 顺手清理早已过期的会话行，避免 download_sessions 无限膨胀
     await env.db
@@ -254,7 +296,7 @@ async function claimSession(
       .bind(now - DOWNLOAD_SESSION_MS * 6)
       .run()
       .catch(() => {});
-    return { isNew: true, admitted: true, claimed: true };
+    return { isNew: true, admitted: true, claimed: true, sessionAt: now };
   }
 
   // ③ 没抢到名额：可能是同一批并发分片里有一个刚建好会话（本请求的判断略早），
@@ -263,16 +305,17 @@ async function claimSession(
     await new Promise((r) => setTimeout(r, 40));
     const again = await env.db
       .prepare(
-        `UPDATE download_sessions SET bytes = bytes + ?4
+        `UPDATE download_sessions SET bytes = bytes + ?4, created_at = ?5
           WHERE share_id = ?1 AND ip = ?2 AND created_at > ?3
-            AND counted = 1 AND bytes + ?4 <= ?5`
+            AND counted = 1 AND bytes + ?4 <= ?6`
       )
-      .bind(id, ip, fresh, need, cap)
+      .bind(id, ip, fresh, need, now, cap)
       .run();
-    if ((again.meta.changes ?? 0) > 0) return { isNew: false, admitted: true, claimed: false };
+    if ((again.meta.changes ?? 0) > 0)
+      return { isNew: false, admitted: true, claimed: false, sessionAt: now };
   }
   // 名额已满 / 预算已耗尽 → 拒绝（不占名额）
-  return { isNew: false, admitted: false, claimed: false };
+  return { isNew: false, admitted: false, claimed: false, sessionAt: null };
 }
 
 /** 退还预占的名额 + 删除会话 —— 请求未真正把文件发出去时调用 */
@@ -280,18 +323,25 @@ async function refundSlot(
   env: Env,
   table: "shares" | "direct_links",
   id: string,
-  ip: string
+  ip: string,
+  sessionAt: number | null
 ): Promise<void> {
-  await env.db
-    .batch([
+  const stmts = [
+    env.db
+      .prepare(
+        `UPDATE ${table} SET download_count = CASE WHEN download_count > 0 THEN download_count - 1 ELSE 0 END WHERE id = ?1`
+      )
+      .bind(id),
+  ];
+  // 只在会话仍是这次请求创建的那一行时才删除 —— 避免误删并发分片刚建好的新会话
+  if (sessionAt !== null) {
+    stmts.push(
       env.db
-        .prepare(
-          `UPDATE ${table} SET download_count = CASE WHEN download_count > 0 THEN download_count - 1 ELSE 0 END WHERE id = ?1`
-        )
-        .bind(id),
-      env.db.prepare("DELETE FROM download_sessions WHERE share_id = ?1 AND ip = ?2").bind(id, ip),
-    ])
-    .catch(() => {});
+        .prepare("DELETE FROM download_sessions WHERE share_id = ?1 AND ip = ?2 AND created_at = ?3")
+        .bind(id, ip, sessionAt)
+    );
+  }
+  await env.db.batch(stmts).catch(() => {});
 }
 
 /**
@@ -304,13 +354,19 @@ async function refundSlot(
  *
  * 只退「未发送」的部分，已发送的字节仍然计入（流量本来就消耗了）。
  */
-async function releaseSessionBytes(env: Env, id: string, ip: string, unsent: number): Promise<void> {
+async function releaseSessionBytes(
+  env: Env,
+  id: string,
+  ip: string,
+  unsent: number,
+  sessionAt: number
+): Promise<void> {
   if (unsent <= 0) return;
   await env.db
     .prepare(
-      "UPDATE download_sessions SET bytes = MAX(0, bytes - ?3) WHERE share_id = ?1 AND ip = ?2"
+      "UPDATE download_sessions SET bytes = MAX(0, bytes - ?4) WHERE share_id = ?1 AND ip = ?2 AND created_at = ?3"
     )
-    .bind(id, ip, unsent)
+    .bind(id, ip, sessionAt, unsent)
     .run()
     .catch(() => {});
 }
@@ -361,13 +417,16 @@ interface DownloadSlot {
   admitted: boolean;
   /** 本次请求是否预占了名额（失败/中止时必须退还） */
   claimed: boolean;
+  /** 本次准入的会话时间戳（HEAD / 探测等未预占字节的请求为 null） */
+  sessionAt: number | null;
 }
 
 /**
  * 判定一次下载请求是否占用下载名额 —— 只有「开启新下载会话」的那一次才占用：
  *   · HEAD：纯元数据探测 → 不占用
  *   · `bytes=0-0` 首字节探测 → 不占用
- *   · 同一会话内（TTL 内已有会话、且未超出一次完整文件的字节预算）的分片/续传 → 不占用
+ *   · Range 已越过文件末尾（会收到 416）→ 不占用（没有发送任何内容）
+ *   · 同一会话内（TTL 内已有会话、且未超出预算）的分片/续传 → 不占用
  *   · 其余：原子抢名额并开启新会话。
  *
  * 旧实现用 `download_logs` 判断续传，且**没有时间窗口**：任何历史下载记录都会让该 IP
@@ -383,9 +442,10 @@ async function evaluateDownloadSlot(
   maxDownloads: number | null,
   kind: "share" | "direct" = "share"
 ): Promise<DownloadSlot> {
-  const skip = (): DownloadSlot => ({ consumesSlot: false, admitted: true, claimed: false });
+  const skip = (): DownloadSlot => ({ consumesSlot: false, admitted: true, claimed: false, sessionAt: null });
   if (req.method === "HEAD") return skip();
   if (isByteProbe(req, size)) return skip();
+  if (isUnsatisfiableRange(req.headers.get("range"), size)) return skip();
   // 本次请求实际要发送的字节数（无 Range = 整份文件）—— 作为会话的字节预算预占量。
   // ⚠️ 必须精确传入：预算 = 一个名额最多买下「一份文件」的字节。
   const range = parseRange(req.headers.get("range"), size);
@@ -399,7 +459,42 @@ async function evaluateDownloadSlot(
     size,
     len
   );
-  return { consumesSlot: claim.isNew, admitted: claim.admitted, claimed: claim.claimed };
+  return {
+    consumesSlot: claim.isNew,
+    admitted: claim.admitted,
+    claimed: claim.claimed,
+    sessionAt: claim.sessionAt,
+  };
+}
+
+/**
+ * 历史脏数据兜底：早期 WebDAV / S3 流式上传会漏记 size（D1 里留成 0）。
+ * 必须在**计算 Range / 预占字节预算之前**把真实大小补回来，否则：
+ *   · 字节预算按 size=0 算成 1 字节 → 多线程 / 断点续传的第二个分片必然 410；
+ *   · content-length 为 0 → 浏览器把文件当成空文件。
+ */
+async function resolveFileSize(
+  env: Env,
+  ctx: ExecutionContext,
+  row: { file_id: string; key: string; size: number }
+): Promise<void> {
+  if (row.size > 0) return;
+  try {
+    const st = await storage(env);
+    const meta = await st.head(row.key);
+    if (meta && meta.size > 0) {
+      row.size = meta.size;
+      ctx.waitUntil(
+        env.db
+          .prepare("UPDATE files SET size = ?1 WHERE id = ?2 AND size <= 0")
+          .bind(meta.size, row.file_id)
+          .run()
+          .catch(() => {})
+      );
+    }
+  } catch {
+    /* 存储不可用 / 对象不存在 → 保持 0，后续会走 404 / 502 分支 */
+  }
 }
 
 /* ═══════════ 分享密码 & 下载授权令牌 ═══════════
