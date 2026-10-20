@@ -385,28 +385,19 @@ export async function handleDownload(
   const headerCode = req.headers.get("x-activation-code");
   const activationCode = (urlCode || headerCode || "").trim().toUpperCase() || null;
 
-  const [codeRow, ban, row] = await Promise.all([
+  const [foundCode, ban, row] = await Promise.all([
     activationCode ? findCodeByString(env, activationCode) : Promise.resolve(null),
     env.db.prepare("SELECT reason, expires_at FROM banned_ips WHERE ip = ?1")
       .bind(ip).first<{ reason: string | null; expires_at: number | null }>(),
     getShare(env, token),
   ]);
 
-  if (activationCode && codeRow) {
-    const check = checkCodeUsable(codeRow as any);
-    if (!check.ok) {
-      const reason = check.reason;
-      let title = "激活码不可用";
-      if (reason === "exhausted") title = "激活码流量已耗尽";
-      if (reason === "expired") title = "激活码已过期";
-      if (reason === "revoked") title = "激活码已作废";
-      return errorPage(req, 403,
-        { zh: title, en: "Activation Code Unavailable" },
-        { zh: check.message || reason || "该激活码不可用", en: check.message || "This activation code is not available" },
-        { siteTitle: settings.siteTitle });
-    }
-    activateCodeIfNeeded(env, codeRow!).catch(() => {});
-  }
+  // 激活码不可用（已作废 / 已过期 / 额度耗尽）时**不阻断下载**，直接忽略该码，
+  // 回退到普通通道（照常受全局月度限额 / 每 IP 限次约束）。
+  // 这与在线预览(handlePreviewOpen)的处理保持一致；只有可用状态的有效码才抵扣独立额度。
+  // 若在此处返回错误页，会导致用户浏览器 localStorage 里残留的失效码把正常下载也一并卡死。
+  const codeRow = foundCode && checkCodeUsable(foundCode as any).ok ? foundCode : null;
+  if (codeRow) activateCodeIfNeeded(env, codeRow).catch(() => {});
 
   if (ban) {
     if (ban.expires_at && ban.expires_at < Date.now()) {
@@ -528,23 +519,16 @@ export async function handleDirectDownload(
   const headerCode = req.headers.get("x-activation-code");
   const activationCode = (urlCode || headerCode || "").trim().toUpperCase() || null;
 
-  const [codeRow, ban, row] = await Promise.all([
+  const [foundCode, ban, row] = await Promise.all([
     activationCode ? findCodeByString(env, activationCode) : Promise.resolve(null),
     env.db.prepare("SELECT reason, expires_at FROM banned_ips WHERE ip = ?1")
       .bind(ip).first<{ reason: string | null; expires_at: number | null }>(),
     getDirectLink(env, token),
   ]);
 
-  if (activationCode && codeRow) {
-    const check = checkCodeUsable(codeRow as any);
-    if (!check.ok) {
-      return errorPage(req, 403,
-        { zh: "激活码不可用", en: "Activation Code Unavailable" },
-        { zh: check.message || check.reason || "该激活码不可用", en: check.message || "This activation code is not available" },
-        { siteTitle: settings.siteTitle });
-    }
-    activateCodeIfNeeded(env, codeRow!).catch(() => {});
-  }
+  // 同 handleDownload：失效 / 耗尽的激活码不阻断直链下载，忽略并回退到普通通道。
+  const codeRow = foundCode && checkCodeUsable(foundCode as any).ok ? foundCode : null;
+  if (codeRow) activateCodeIfNeeded(env, codeRow).catch(() => {});
 
   if (ban) {
     if (ban.expires_at && ban.expires_at < Date.now()) {
