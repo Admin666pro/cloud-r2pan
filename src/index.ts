@@ -311,18 +311,22 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     //   /preview/raw  内联流式原始文件（Range 支持）
     //   /preview/zip  解析 ZIP 内部结构
     if (sub === "/preview") {
-      if (req.method !== "GET" && req.method !== "HEAD") {
+      // 仅允许 GET —— 预览是"计次"操作，HEAD 不应消耗全站预览额度
+      if (req.method !== "GET") {
         return new Response("Method Not Allowed", { status: 405 });
       }
       return handlePreviewOpen(req, env, token);
     }
     if (sub === "/preview/raw") {
-      if (req.method !== "GET" && req.method !== "HEAD") {
+      if (req.method !== "GET") {
         return new Response("Method Not Allowed", { status: 405 });
       }
       return handlePreviewRaw(req, env, ctx, token);
     }
     if (sub === "/preview/zip") {
+      if (req.method !== "GET") {
+        return new Response("Method Not Allowed", { status: 405 });
+      }
       return handlePreviewZip(req, env, token);
     }
     return notFound(req);

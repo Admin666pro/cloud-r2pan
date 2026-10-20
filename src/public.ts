@@ -50,13 +50,20 @@ async function getTurnstileSecret(env: Env, settings: { turnstileSecretCipher: s
   return null;
 }
 
-/** 判断当前 Turnstile 是否可用（secret 必须在 env 或 settings 里配） */
+/**
+ * 判断当前 Turnstile 是否可用。
+ * ⚠️ secret 与 sitekey **必须同时具备**才算启用：前端只有拿到 sitekey 才能渲染 widget 换取 cf 令牌。
+ * 若只配了 secret 而没有 sitekey，前端拿不到令牌 → 服务端却强制要求 cf → 所有下载都会 403，
+ * 形成"配置一半就把站点锁死"的坑。这里要求两者齐全，避免该锁死。
+ */
 export async function isTurnstileEnabled(
   env: Env,
-  settings: { turnstileMode: string; turnstileThreshold: number; turnstileSecretCipher: string | null }
+  settings: { turnstileMode: string; turnstileThreshold: number; turnstileSecretCipher: string | null; turnstileSitekeyOverride: string | null }
 ): Promise<boolean> {
   const secret = await getTurnstileSecret(env, settings);
   if (!secret) return false;
+  const sitekey = env.turnstile_sitekey || settings.turnstileSitekeyOverride || null;
+  if (!sitekey) return false;
   if (settings.turnstileMode === "off") return false;
   return true;
 }
@@ -122,6 +129,277 @@ function parseRange(header: string | null, size: number): { offset: number; leng
   }
   if (offset >= size || length <= 0) return null;
   return { offset, length };
+}
+
+/** 下载会话的存活窗口 —— 同一窗口内同一 (分享, IP) 的请求归并为同一次下载（持续有请求则不断续期） */
+const DOWNLOAD_SESSION_MS = 10 * 60 * 1000;
+
+/**
+ * 是否为「探测性」Range 请求 —— 只请求**文件头部第 1 个字节**（`bytes=0-0`）。
+ * 下载管理器 / 浏览器常用它来探测服务端是否支持断点续传（是否有 206）。
+ *
+ * ⚠️ 必须严格限定为 offset === 0、length === 1：
+ *   若像早期实现那样把「任意 1 字节范围」都当作探测，攻击者就能用 `bytes=N-N` 逐字节
+ *   把整个文件拉下来，而每一次都不占用下载名额 / 不触发每 IP 限次 —— 等于 max_downloads
+ *   形同虚设。`bytes=0-0` 是业界通用探测头，只取首字节不会造成实际泄露。
+ */
+function isByteProbe(req: Request, size: number): boolean {
+  const r = parseRange(req.headers.get("range"), size);
+  return !!r && r.offset === 0 && r.length === 1;
+}
+
+interface SessionClaim {
+  /** 是否开启了新会话（= 需要占用下载名额 / 计次 / 写日志） */
+  isNew: boolean;
+  /** 是否属于一次**已被准入**的下载（新会话准入，或已计数的既有会话续期） */
+  admitted: boolean;
+  /** 本次请求是否**已经预占了一个名额**（失败回滚时要退还） */
+  claimed: boolean;
+}
+
+/**
+ * 原子认领一次下载会话 —— 「先抢名额，再建会话」+「会话字节预算」双重约束。
+ *
+ * ── 为什么旧实现会双向出问题 ─────────────────────────────────────
+ * 旧实现只在「新建会话」时判断名额，且名额是在**后续请求**里才 +1 的：
+ *   · 过松（= 无法下载）：多线程下载器把一次下载拆成 N 个**并发分片**几乎同时到达，
+ *     多个分片同时看到 `download_count` 还是旧值 → 有的互相覆盖会话、有的在名额已被
+ *     第一个分片占掉后直接 410。实测 max_downloads=1 时 4 个分片只有 1 个能下。
+ *   · 过严（= 流量被刷光）：同一 (分享, IP) 在 10 分钟窗口内的**任意**后续请求都被
+ *     当作"续传"免费放行 —— 攻击者点一次下载后，可在窗口内无限次重下整个文件。
+ *
+ * ── 现方案 ───────────────────────────────────────────────────────
+ *   ① 已有被准入会话，且本次字节还在「一份文件」预算内 → 同步预占字节，免费放行；
+ *   ② 否则原子抢占名额（`UPDATE ... WHERE 名额未满` + 会话插入 `ON CONFLICT DO NOTHING`），
+ *      D1/SQLite 单写入者串行化，并发下只会有一个分片抢到，其余走 ① 变成同一会话的续传；
+ *   ③ 名额已满 / 预算已耗尽 → 短暂等待确认没有并发分片刚建好会话，确实没有 → 拒绝。
+ *
+ * 字节预算（`download_sessions.bytes`）必须**同步**预占（在响应发出前落库），否则
+ * 攻击者可以在后台记账落库之前流水线式发一堆请求，全部被判成"续传"白嫖。
+ * 一个名额最多买下"一份文件"的字节量：并发分片之和 = size 只占 1 个名额；
+ * 想要第二份拷贝（`bytes + len > size`）就必须重新抢名额。
+ */
+async function claimSession(
+  env: Env,
+  table: "shares" | "direct_links",
+  id: string,
+  ip: string,
+  maxDownloads: number | null,
+  size: number,
+  len: number
+): Promise<SessionClaim> {
+  const now = Date.now();
+  const fresh = now - DOWNLOAD_SESSION_MS; // created_at > fresh 才算"有效会话"
+  const max = maxDownloads && maxDownloads > 0 ? Math.floor(maxDownloads) : 0; // 0 = 不限
+  const cap = size > 0 ? size : 1; // 空文件给 1 字节预算，避免 0 预算永远拒绝
+  // 预算按「至少 1 字节」计：否则 0 字节文件（或 bytes=0-0 之外的 0 长 Range）永远满足
+  // `bytes + 0 <= cap`，可以无限次被当作"续传"免费放行，max_downloads 对空文件失效。
+  const need = Math.max(1, len);
+
+  // 0) 精准清理本 (分享, IP) 的过期会话行 —— 旧行不能影响本次判定
+  await env.db
+    .prepare("DELETE FROM download_sessions WHERE share_id = ?1 AND ip = ?2 AND created_at <= ?3")
+    .bind(id, ip, fresh)
+    .run()
+    .catch(() => {});
+
+  // ① 免费续传：已有被准入会话，且本次字节仍在「一份文件」预算内 → 原子预占字节
+  const ext = await env.db
+    .prepare(
+      `UPDATE download_sessions SET created_at = ?3, bytes = bytes + ?5
+        WHERE share_id = ?1 AND ip = ?2 AND created_at > ?4
+          AND counted = 1 AND bytes + ?5 <= ?6`
+    )
+    .bind(id, ip, now, fresh, need, cap)
+    .run();
+  if ((ext.meta.changes ?? 0) > 0) return { isNew: false, admitted: true, claimed: false };
+
+  // ② 先原子抢名额 —— 只有真正抢到名额的请求才有权重建会话。
+  //    ⚠️ 旧实现是「先删掉同 (分享, IP) 的旧会话再插新会话」：一个并发的重复请求
+  //    （用户双击下载、下载器重试）会把**另一个正在下载的请求的会话删掉**，导致同一次
+  //    多线程下载的其余分片随后被判 410 —— 典型的「正常用户无法下载」。
+  //    现在失败者不会碰别人的会话，只会在 ③ 里短暂等待并尝试续传。
+  const take = await env.db
+    .prepare(
+      `UPDATE ${table} SET download_count = download_count + 1
+       WHERE id = ?1 AND (?2 = 0 OR download_count < ?2)`
+    )
+    .bind(id, max)
+    .run();
+  if ((take.meta.changes ?? 0) > 0) {
+    // 抢到名额 → 用它开启一个全新的会话（旧的半截会话已由这个名额买断，可安全替换）
+    try {
+      await env.db.batch([
+        env.db.prepare("DELETE FROM download_sessions WHERE share_id = ?1 AND ip = ?2").bind(id, ip),
+        env.db
+          .prepare(
+            "INSERT INTO download_sessions(share_id, ip, created_at, counted, bytes) VALUES(?1, ?2, ?3, 1, ?4)"
+          )
+          .bind(id, ip, now, need),
+      ]);
+    } catch (err) {
+      // 会话落库失败 → 退还刚抢到的名额，避免分享被无效请求慢慢锁死
+      await env.db
+        .prepare(
+          `UPDATE ${table} SET download_count = CASE WHEN download_count > 0 THEN download_count - 1 ELSE 0 END WHERE id = ?1`
+        )
+        .bind(id)
+        .run()
+        .catch(() => {});
+      return { isNew: false, admitted: false, claimed: false };
+    }
+    // 顺手清理早已过期的会话行，避免 download_sessions 无限膨胀
+    await env.db
+      .prepare("DELETE FROM download_sessions WHERE created_at < ?1")
+      .bind(now - DOWNLOAD_SESSION_MS * 6)
+      .run()
+      .catch(() => {});
+    return { isNew: true, admitted: true, claimed: true };
+  }
+
+  // ③ 没抢到名额：可能是同一批并发分片里有一个刚建好会话（本请求的判断略早），
+  //    短暂等待后按「续传」原子预占，避免同一批分片被误杀。
+  for (let i = 0; i < 5; i++) {
+    await new Promise((r) => setTimeout(r, 40));
+    const again = await env.db
+      .prepare(
+        `UPDATE download_sessions SET bytes = bytes + ?4
+          WHERE share_id = ?1 AND ip = ?2 AND created_at > ?3
+            AND counted = 1 AND bytes + ?4 <= ?5`
+      )
+      .bind(id, ip, fresh, need, cap)
+      .run();
+    if ((again.meta.changes ?? 0) > 0) return { isNew: false, admitted: true, claimed: false };
+  }
+  // 名额已满 / 预算已耗尽 → 拒绝（不占名额）
+  return { isNew: false, admitted: false, claimed: false };
+}
+
+/** 退还预占的名额 + 删除会话 —— 请求未真正把文件发出去时调用 */
+async function refundSlot(
+  env: Env,
+  table: "shares" | "direct_links",
+  id: string,
+  ip: string
+): Promise<void> {
+  await env.db
+    .batch([
+      env.db
+        .prepare(
+          `UPDATE ${table} SET download_count = CASE WHEN download_count > 0 THEN download_count - 1 ELSE 0 END WHERE id = ?1`
+        )
+        .bind(id),
+      env.db.prepare("DELETE FROM download_sessions WHERE share_id = ?1 AND ip = ?2").bind(id, ip),
+    ])
+    .catch(() => {});
+}
+
+/**
+ * 释放会话里「预占但实际没发出去」的字节（客户端中途断开 / 流读取失败）。
+ *
+ * 为什么需要它：`claimSession` 在响应发出前就同步预占了本次请求的字节预算（防流水线白嫖），
+ * 但客户端可能只读了一半就断开（暂停、切网、多线程分片提前结束）。若不退还，这部分
+ * "空气字节"会永久占着该名额的预算 —— 用户重新点下载/断点续传时 `bytes + len > size`，
+ * 被判定为"想要第二份拷贝"而 410，表现就是**正常用户无法下载**。
+ *
+ * 只退「未发送」的部分，已发送的字节仍然计入（流量本来就消耗了）。
+ */
+async function releaseSessionBytes(env: Env, id: string, ip: string, unsent: number): Promise<void> {
+  if (unsent <= 0) return;
+  await env.db
+    .prepare(
+      "UPDATE download_sessions SET bytes = MAX(0, bytes - ?3) WHERE share_id = ?1 AND ip = ?2"
+    )
+    .bind(id, ip, unsent)
+    .run()
+    .catch(() => {});
+}
+
+/**
+ * 把响应体包一层，统计真实发送字节；流被取消/读取失败时把未发送的预占额度退还给会话。
+ * 正常读完整份 → 预占量 == 发送量，无需退还。
+ */
+function trackSentBytes(
+  body: ReadableStream<Uint8Array>,
+  onSettled: (sent: number, complete: boolean) => void
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  let sent = 0;
+  let settled = false;
+  const settle = (complete: boolean) => {
+    if (settled) return;
+    settled = true;
+    onSettled(sent, complete);
+  };
+  return new ReadableStream<Uint8Array>({
+    async pull(ctrl) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          settle(true);
+          ctrl.close();
+          return;
+        }
+        sent += value.byteLength;
+        ctrl.enqueue(value);
+      } catch (err) {
+        settle(false);
+        ctrl.error(err);
+      }
+    },
+    cancel(reason) {
+      settle(false);
+      return reader.cancel(reason);
+    },
+  });
+}
+
+interface DownloadSlot {
+  /** 本次请求是否开启了一次「新的下载」（需要占用名额 / 计次 / 写日志） */
+  consumesSlot: boolean;
+  /** 本次请求是否**已被准入**（可为空名额之外的下载提供服务） */
+  admitted: boolean;
+  /** 本次请求是否预占了名额（失败/中止时必须退还） */
+  claimed: boolean;
+}
+
+/**
+ * 判定一次下载请求是否占用下载名额 —— 只有「开启新下载会话」的那一次才占用：
+ *   · HEAD：纯元数据探测 → 不占用
+ *   · `bytes=0-0` 首字节探测 → 不占用
+ *   · 同一会话内（TTL 内已有会话、且未超出一次完整文件的字节预算）的分片/续传 → 不占用
+ *   · 其余：原子抢名额并开启新会话。
+ *
+ * 旧实现用 `download_logs` 判断续传，且**没有时间窗口**：任何历史下载记录都会让该 IP
+ * 此后所有 `Range: bytes=N-` 请求永远免费 —— 只要下过一次，就能靠 `bytes=1-` 反复
+ * 拉取整个文件，彻底绕过 max_downloads。现改为基于会话（带 TTL + 字节预算）判定。
+ */
+async function evaluateDownloadSlot(
+  env: Env,
+  req: Request,
+  token: string,
+  ip: string,
+  size: number,
+  maxDownloads: number | null,
+  kind: "share" | "direct" = "share"
+): Promise<DownloadSlot> {
+  const skip = (): DownloadSlot => ({ consumesSlot: false, admitted: true, claimed: false });
+  if (req.method === "HEAD") return skip();
+  if (isByteProbe(req, size)) return skip();
+  // 本次请求实际要发送的字节数（无 Range = 整份文件）—— 作为会话的字节预算预占量。
+  // ⚠️ 必须精确传入：预算 = 一个名额最多买下「一份文件」的字节。
+  const range = parseRange(req.headers.get("range"), size);
+  const len = range ? range.length : size;
+  const claim = await claimSession(
+    env,
+    kind === "direct" ? "direct_links" : "shares",
+    token,
+    ip,
+    maxDownloads,
+    size,
+    len
+  );
+  return { consumesSlot: claim.isNew, admitted: claim.admitted, claimed: claim.claimed };
 }
 
 /* ═══════════ 分享密码 & 下载授权令牌 ═══════════
@@ -414,21 +692,44 @@ export async function handleDownload(
     { zh: "该分享已被管理员撤销。", en: "This share has been revoked." });
   if (row.expires_at && row.expires_at < Date.now()) return errorPage(req, 410, { zh: "链接已过期", en: "Link Expired" },
     { zh: "该分享已超过有效期。", en: "This share has expired." });
-  if (row.max_downloads && row.download_count >= row.max_downloads) return errorPage(req, 410, { zh: "下载次数已达上限", en: "Download Limit Reached" },
-    { zh: `该资源允许下载 ${row.max_downloads} 次，名额已用完。`, en: `Download limit (${row.max_downloads}) reached.` });
+  // ── 判断本次请求是否"开启一次新下载" ────────────────────────────────
+  //  · HEAD：纯元数据探测（浏览器预检 / 下载器探测 / 链接预览），不计次、不扣名额、不计流量；
+  //  · 单字节探测 Range（如 bytes=0-0）：下载器/浏览器用它探测是否支持断点续传，
+  //    若计次会把名额直接吃掉，导致真正的下载被 410 卡死；
+  //  · 同一"下载会话"内的分片 / 断点续传：多线程下载器把一次下载拆成 N 个并发分片，
+  //    逐个计次会瞬间刷爆 max_downloads 与每 IP 限次并触发自动封禁。
+  //  会话由 download_sessions 表以 (分享, IP) 为键原子认领，只有"开启新会话"的那一次计次。
+  const slot = await evaluateDownloadSlot(env, req, token, ip, row.size, row.max_downloads, "share");
+  const consumesSlot = slot.consumesSlot;
+  // 门禁拦截时退还刚预占的名额 —— 否则"未真正把文件发出去"的失败请求会白吃一个名额，
+  // 分享会被无效请求慢慢锁死（410）。
+  const refundIfClaimed = async (): Promise<void> => {
+    if (slot.claimed) await refundSlot(env, "shares", token, ip);
+  };
+  const block = async (resp: Response): Promise<Response> => {
+    await refundIfClaimed();
+    return resp;
+  };
 
-  if (row.max_downloads) {
-    const r = await env.db.prepare(
-      `UPDATE shares SET download_count = download_count + 1 WHERE id = ?1 AND download_count < ?2`
-    ).bind(token, row.max_downloads).run();
-    if ((r.meta.changes ?? 0) === 0)
-      return errorPage(req, 410, { zh: "下载次数已达上限", en: "Download Limit Reached" },
-        { zh: `名额已用完。`, en: `Quota used up.` });
-  }
+  // 名额已满 / 会话预算已耗尽：`admitted=false` 已经由 claimSession 原子判定（它会重新读取
+  // 实时 download_count 并原子抢名额）。⚠️ 不能再用上面查到的 row.download_count 判断 ——
+  // 并发请求读到的都是**旧值**，两个请求会同时通过，出现"满额后还能再白嫖一次"。
+  if (!slot.admitted)
+    return block(errorPage(req, 410, { zh: "下载次数已达上限", en: "Download Limit Reached" },
+      { zh: row.max_downloads
+        ? `该资源允许下载 ${row.max_downloads} 次，名额已用完。`
+        : "该资源本次下载名额已用完，请稍后重试。",
+        en: row.max_downloads
+          ? `Download limit (${row.max_downloads}) reached.`
+          : "The download quota for this session is used up. Please retry later." }));
+
+  // ⚠️ 下载名额的原子扣减**必须放在所有门禁通过之后**（见文件末尾「原子扣名额」）。
+  // 旧实现在此提前扣减，导致密码错误 / 未登录 / 人机验证失败 / 流量超限 / 存储读失败等
+  // 任何一次"没真正把文件发出去"的请求都会白白吃掉一个名额，最终把分享锁死（410）。
 
   if (row.password_hash && !(await verifyShareToken(env, token, new URL(req.url).search))) {
-    return errorPage(req, 403, { zh: "需要访问密码", en: "Password Required" },
-      { zh: "该分享受密码保护。", en: "This share is password-protected." });
+    return block(errorPage(req, 403, { zh: "需要访问密码", en: "Password Required" },
+      { zh: "该分享受密码保护。", en: "This share is password-protected." }));
   }
 
   if (settings.oauthEnabled) {
@@ -436,9 +737,9 @@ export async function handleDownload(
     if (!oauthResult.ok) {
       const providerName = settings.oauthProvider === "custom" ? "OAuth" : settings.oauthProvider;
       const startUrl = `/oauth/start?provider=${encodeURIComponent(settings.oauthProvider)}&redirect=${encodeURIComponent("/s/" + token)}`;
-      return errorPage(req, 401, { zh: "需要登录", en: "OAuth Login Required" },
+      return block(errorPage(req, 401, { zh: "需要登录", en: "OAuth Login Required" },
         { zh: `该资源需要通过 ${providerName} 账号登录后才能下载。`, en: `This resource requires ${providerName} login.` },
-        { siteTitle: settings.siteTitle, oauth_login_url: startUrl });
+        { siteTitle: settings.siteTitle, oauth_login_url: startUrl }));
     }
   }
 
@@ -449,15 +750,15 @@ export async function handleDownload(
     if (downloadGate) {
       const turnstileToken = url.searchParams.get("cf");
       if (!turnstileToken) {
-        return errorPage(req, 403, { zh: "需要验证码", en: "Turnstile Required" },
+        return block(errorPage(req, 403, { zh: "需要验证码", en: "Turnstile Required" },
           { zh: "请先通过人机验证。", en: "Please complete human verification." },
-          { siteTitle: settings.siteTitle });
+          { siteTitle: settings.siteTitle }));
       }
       const pass = await verifyTurnstileToken(env, settings, turnstileToken, ip);
       if (!pass) {
-        return errorPage(req, 403, { zh: "验证码校验失败", en: "Turnstile Failed" },
+        return block(errorPage(req, 403, { zh: "验证码校验失败", en: "Turnstile Failed" },
           { zh: "人机验证未通过。", en: "Human verification failed." },
-          { siteTitle: settings.siteTitle });
+          { siteTitle: settings.siteTitle }));
       }
     }
   }
@@ -466,16 +767,16 @@ export async function handleDownload(
     const whitelisted = isAdminWhitelisted(ip, settings.adminIps);
     const usingCode = !!codeRow;
     if (!whitelisted && !usingCode && settings.trafficLimitBytes > 0 && settings.trafficUsedBytes >= settings.trafficLimitBytes) {
-      return errorPage(req, 503, { zh: "下载已暂停", en: "Downloads Paused" },
+      return block(errorPage(req, 503, { zh: "下载已暂停", en: "Downloads Paused" },
         { zh: "本月流量已达预设限额。", en: "Monthly traffic quota reached." },
-        { siteTitle: settings.siteTitle });
+        { siteTitle: settings.siteTitle }));
     }
   }
 
   {
     const whitelisted = isAdminWhitelisted(ip, settings.adminIps);
     const usingCode = !!codeRow;
-    if (!whitelisted && !usingCode && settings.maxDownloadsPerIp > 0) {
+    if (consumesSlot && !whitelisted && !usingCode && settings.maxDownloadsPerIp > 0) {
       const since = settings.countWindowHours > 0 ? Date.now() - settings.countWindowHours * 3600_000 : 0;
       const { c } = (await env.db.prepare(
         "SELECT COUNT(*) AS c FROM download_logs WHERE share_id = ?1 AND ip = ?2 AND created_at > ?3"
@@ -488,15 +789,17 @@ export async function handleDownload(
              ON CONFLICT(ip) DO UPDATE SET reason = excluded.reason, banned_at = excluded.banned_at, expires_at = excluded.expires_at`
           ).bind(ip, `重复下载「${row.name}」超过 ${settings.maxDownloadsPerIp} 次`, Date.now(), expiresAt).run();
         }
-        return errorPage(req, 403, { zh: "重复下载被拦截", en: "Duplicate Download Blocked" },
+        return block(errorPage(req, 403, { zh: "重复下载被拦截", en: "Duplicate Download Blocked" },
           { zh: `同一 IP 在统计窗口内下载此资源的次数已达上限（${settings.maxDownloadsPerIp} 次）。`,
             en: `This IP has reached the download limit (${settings.maxDownloadsPerIp}).` },
-          { siteTitle: settings.siteTitle });
+          { siteTitle: settings.siteTitle }));
       }
     }
   }
 
-  return streamFile(req, env, ctx, row, token, "share");
+  // ── 名额已在 claimSession 阶段原子预占 —— streamFile 只负责"没真正发出去时退还"，
+  //    存储读失败 / 对象已被删除时退还名额，避免分享被无效请求慢慢锁死（410）。
+  return streamFile(req, env, ctx, row, token, "share", consumesSlot, refundIfClaimed);
 }
 
 /**
@@ -545,32 +848,46 @@ export async function handleDirectDownload(
     { zh: "该直链已被撤销。", en: "Direct link revoked." });
   if (row.expires_at && row.expires_at < Date.now()) return errorPage(req, 410, { zh: "直链已过期", en: "Link Expired" },
     { zh: "该直链已超过有效期。", en: "Direct link expired." });
-  if (row.max_downloads && row.download_count >= row.max_downloads) return errorPage(req, 410, { zh: "下载次数已达上限", en: "Download Limit Reached" },
-    { zh: `名额已用完。`, en: `Quota used up.` });
+  // ── 同 handleDownload：HEAD / 单字节探测 / 同一会话内的分片与续传不占名额，
+  //    只有"开启新下载会话"的那一次计次（详见 handleDownload 与 evaluateDownloadSlot 注释）
+  const slot = await evaluateDownloadSlot(env, req, token, ip, row.size, row.max_downloads, "direct");
+  const consumesSlot = slot.consumesSlot;
+  // 门禁拦截时退还刚预占的名额（同 handleDownload）。
+  const refundIfClaimed = async (): Promise<void> => {
+    if (slot.claimed) await refundSlot(env, "direct_links", token, ip);
+  };
+  const block = async (resp: Response): Promise<Response> => {
+    await refundIfClaimed();
+    return resp;
+  };
 
-  if (row.max_downloads) {
-    const r = await env.db.prepare(
-      `UPDATE direct_links SET download_count = download_count + 1 WHERE id = ?1 AND download_count < ?2`
-    ).bind(token, row.max_downloads).run();
-    if ((r.meta.changes ?? 0) === 0)
-      return errorPage(req, 410, { zh: "下载次数已达上限", en: "Download Limit Reached" },
-        { zh: `名额已用完。`, en: `Quota used up.` });
-  }
+  // 同 handleDownload：`admitted=false` 由 claimSession 原子判定（实时名额 + 会话预算），
+  // 不能依赖上面查到的（并发下已过期的）row.download_count。
+  if (!slot.admitted)
+    return block(errorPage(req, 410, { zh: "下载次数已达上限", en: "Download Limit Reached" },
+      { zh: row.max_downloads
+        ? `该直链允许下载 ${row.max_downloads} 次，名额已用完。`
+        : "该直链本次下载名额已用完，请稍后重试。",
+        en: row.max_downloads
+          ? `Download limit (${row.max_downloads}) reached.`
+          : "The download quota for this session is used up. Please retry later." }));
+
+  // ⚠️ 同 handleDownload：名额已在 claimSession 阶段预占，失败路径统一退还。
 
   {
     const whitelisted = isAdminWhitelisted(ip, settings.adminIps);
     const usingCode = !!codeRow;
     if (!whitelisted && !usingCode && settings.trafficLimitBytes > 0 && settings.trafficUsedBytes >= settings.trafficLimitBytes) {
-      return errorPage(req, 503, { zh: "下载已暂停", en: "Downloads Paused" },
+      return block(errorPage(req, 503, { zh: "下载已暂停", en: "Downloads Paused" },
         { zh: "本月流量已达预设限额。", en: "Monthly traffic quota reached." },
-        { siteTitle: settings.siteTitle });
+        { siteTitle: settings.siteTitle }));
     }
   }
 
   {
     const whitelisted = isAdminWhitelisted(ip, settings.adminIps);
     const usingCode = !!codeRow;
-    if (!whitelisted && !usingCode && settings.maxDownloadsPerIp > 0) {
+    if (consumesSlot && !whitelisted && !usingCode && settings.maxDownloadsPerIp > 0) {
       const since = settings.countWindowHours > 0 ? Date.now() - settings.countWindowHours * 3600_000 : 0;
       const { c } = (await env.db.prepare(
         "SELECT COUNT(*) AS c FROM download_logs WHERE share_id = ?1 AND ip = ?2 AND created_at > ?3"
@@ -583,14 +900,15 @@ export async function handleDirectDownload(
              ON CONFLICT(ip) DO UPDATE SET reason = excluded.reason, banned_at = excluded.banned_at, expires_at = excluded.expires_at`
           ).bind(ip, `重复下载直链「${row.name}」超过 ${settings.maxDownloadsPerIp} 次`, Date.now(), expiresAt).run();
         }
-        return errorPage(req, 403, { zh: "重复下载被拦截", en: "Duplicate Download Blocked" },
+        return block(errorPage(req, 403, { zh: "重复下载被拦截", en: "Duplicate Download Blocked" },
           { zh: `同一 IP 在统计窗口内下载此资源的次数已达上限。`, en: `IP download limit reached.` },
-          { siteTitle: settings.siteTitle });
+          { siteTitle: settings.siteTitle }));
       }
     }
   }
 
-  return streamFile(req, env, ctx, row, token, "direct");
+  // ── 名额已在 claimSession 阶段原子预占 —— streamFile 只负责"没真正发出去时退还"
+  return streamFile(req, env, ctx, row, token, "direct", consumesSlot, refundIfClaimed);
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -613,88 +931,151 @@ async function streamFile(
   ctx: ExecutionContext,
   row: StreamFileRow,
   token: string,
-  kind: "share" | "direct"
+  kind: "share" | "direct",
+  countAsDownload: boolean,
+  /** 存储读失败 / 对象已被删除时调用：退还预占的下载名额（HEAD 等未占名额的请求内部会自行短路） */
+  onAbort?: () => Promise<void>
 ): Promise<Response> {
   const ip = clientIp(req);
   const ua = req.headers.get("user-agent") ?? "";
   const country = req.headers.get("cf-ipcountry") ?? "";
   const settings = await getSettings(env);
+  const isHead = req.method === "HEAD";
 
   const urlCode = new URL(req.url).searchParams.get("code");
   const headerCode = req.headers.get("x-activation-code");
   const activationCode = (urlCode || headerCode || "").trim().toUpperCase() || null;
   const codeRow = activationCode ? await findCodeByString(env, activationCode) : null;
 
-  const range = parseRange(req.headers.get("range"), row.size);
-  let obj;
+  // HEAD 请求只返回元数据（不读对象内容、不计流量、不写日志），用 head() 走轻量路径。
+  let totalSize = row.size;
+  let contentType = row.mime || "application/octet-stream";
+  let etag = `"${row.file_id}"`;
+  let body: ReadableStream<Uint8Array> | null = null;
+  let range: { offset: number; length: number } | null = null;
   try {
     const st = await storage(env);
-    obj = await st.get(row.key, range ? { offset: range.offset, length: range.length } : undefined);
+    // 历史脏数据兜底：早期 WebDAV / S3 流式上传会漏记 size（留成 0）。若直接按 0 计算，
+    // content-length 会是 0，浏览器把文件当成空文件 —— 表现就是"下载下来是空的 / 下不动"。
+    // 这里先向存储要真实大小并顺手回写 D1，让老文件也能正常下载。
+    if (!isHead && totalSize <= 0) {
+      const meta = await st.head(row.key).catch(() => null);
+      if (meta && meta.size > 0) {
+        totalSize = meta.size;
+        ctx.waitUntil(
+          env.db
+            .prepare("UPDATE files SET size = ?1 WHERE id = ?2 AND size <= 0")
+            .bind(totalSize, row.file_id)
+            .run()
+            .catch(() => {})
+        );
+      }
+    }
+    range = parseRange(req.headers.get("range"), totalSize);
+    if (isHead) {
+      const meta = await st.head(row.key);
+      if (!meta) {
+        await onAbort?.();
+        return errorPage(req, 404, { zh: "文件不存在", en: "File Not Found" },
+          { zh: "文件可能已被删除。", en: "File may have been deleted." });
+      }
+      contentType = meta.contentType || contentType;
+      if (totalSize <= 0) totalSize = meta.size;
+    } else {
+      const obj = await st.get(row.key, range ? { offset: range.offset, length: range.length } : undefined);
+      if (!obj) {
+        await onAbort?.();
+        return errorPage(req, 404, { zh: "文件不存在", en: "File Not Found" },
+          { zh: "文件可能已被删除。", en: "File may have been deleted." });
+      }
+      contentType = obj.contentType;
+      etag = obj.etag;
+      body = obj.body;
+    }
   } catch (err: any) {
-    console.error("[download] storage error:", err);
+    console.error(`[download] storage error (${kind}):`, err);
+    await onAbort?.();
     return errorPage(req, 502, { zh: "存储服务错误", en: "Storage Error" },
       { zh: "无法从存储后端读取文件。", en: "Cannot read file from storage." });
   }
-  if (!obj)
-    return errorPage(req, 404, { zh: "文件不存在", en: "File Not Found" },
-      { zh: "文件可能已被删除。", en: "File may have been deleted." });
+  const servedLen = range ? range.length : totalSize;
 
   const headers = new Headers();
-  headers.set("content-type", obj.contentType);
-  headers.set("etag", obj.etag);
+  headers.set("content-type", contentType);
+  headers.set("etag", etag);
   headers.set("accept-ranges", "bytes");
   headers.set("cache-control", "no-store");
   const displayName = row.download_name || row.name;
   headers.set("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(displayName)}`);
   const { addSecurityHeaders } = await import("./pages");
   addSecurityHeaders(headers, { isDownload: true });
-  const servedLen = range ? range.length : obj.size;
   headers.set("content-length", String(servedLen));
   if (range) {
-    headers.set("content-range", `bytes ${range.offset}-${range.offset + servedLen - 1}/${row.size}`);
+    headers.set("content-range", `bytes ${range.offset}-${range.offset + servedLen - 1}/${totalSize}`);
   }
 
-  // 后台记录
-  const bytes = servedLen;
-  const codeId = codeRow ? codeRow.code : null;
-  ctx.waitUntil(
-    (async () => {
-      const { browser, os } = parseUA(ua);
-
-      if (env.analytics) {
-        try {
-          const latitude = req.headers.get("cf-ip-latitude") ?? "";
-          const longitude = req.headers.get("cf-ip-longitude") ?? "";
-          env.analytics.writeDataPoint({
-            blobs: [
-              country, row.name, browser, os, token,
-              codeId ?? "none", latitude, longitude,
-              settings.storageProvider || "r2",
-            ],
-            doubles: [bytes, 1],
-            indexes: [token],
-          });
-        } catch { /* ignore */ }
+  // ── 会话字节预算 ────────────────────────────────────────────────
+  // claimSession 已在响应发出前**同步预占**了本次请求要发送的字节（`reserved = servedLen`），
+  // 所以这里不再累加（累加会双重计数，导致合法的一次完整下载被算成两份、预算半途耗尽）。
+  // 这里只做一件事：客户端中途断开 / 流读取失败时，把「预占但没真正发出去」的字节退还，
+  // 避免 Air bytes 占着预算把正常用户锁死（重新下载/断点续传时被误判成第二份拷贝 → 410）。
+  if (!isHead && body) {
+    const reserved = servedLen;
+    body = trackSentBytes(body, (sent, complete) => {
+      if (!complete && sent < reserved) {
+        ctx.waitUntil(releaseSessionBytes(env, token, ip, reserved - sent));
       }
+    });
+  }
 
-      await env.db.prepare(
-        `INSERT INTO download_logs(share_id, file_id, file_name, ip, ua, browser, os, country, bytes, created_at, activation_code)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
-      )
-        // 直链也记 download_logs —— share_id 字段存 direct link token 方便追踪
-        .bind(token, row.file_id, row.name, ip, ua.slice(0, 500), browser, os, country, bytes, Date.now(), codeId)
-        .run();
-      await addTraffic(env, bytes);
-      if (codeRow) {
-        const dr = await deductQuota(env, codeRow, bytes);
-        if (!dr.ok) {
-          console.warn(`[code-decline] code=${codeRow.code} reason=${dr.reason} msg=${dr.message}`);
+  // 后台记账：仅在真正把文件发出去时进行（HEAD 不计流量、不写日志）。
+  //   · 流量按实际发送字节累加（续传分片也要计带宽）；
+  //   · 下载记录 / 分析数据点只在「新下载」时写（续传复用同一次下载名额，不重复计数）。
+  if (!isHead) {
+    const bytes = servedLen;
+    const codeId = codeRow ? codeRow.code : null;
+    ctx.waitUntil(
+      (async () => {
+        const { browser, os } = parseUA(ua);
+
+        await addTraffic(env, bytes);
+        if (codeRow) {
+          const dr = await deductQuota(env, codeRow, bytes);
+          if (!dr.ok) {
+            console.warn(`[code-decline] code=${codeRow.code} reason=${dr.reason} msg=${dr.message}`);
+          }
         }
-      }
-    })()
-  );
 
-  return new Response(obj.body, { status: range ? 206 : 200, headers });
+        if (!countAsDownload) return;
+
+        if (env.analytics) {
+          try {
+            const latitude = req.headers.get("cf-ip-latitude") ?? "";
+            const longitude = req.headers.get("cf-ip-longitude") ?? "";
+            env.analytics.writeDataPoint({
+              blobs: [
+                country, row.name, browser, os, token,
+                codeId ?? "none", latitude, longitude,
+                settings.storageProvider || "r2",
+              ],
+              doubles: [bytes, 1],
+              indexes: [token],
+            });
+          } catch { /* ignore */ }
+        }
+
+        await env.db.prepare(
+          `INSERT INTO download_logs(share_id, file_id, file_name, ip, ua, browser, os, country, bytes, created_at, activation_code)
+           VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
+        )
+          // 直链也记 download_logs —— share_id 字段存 direct link token 方便追踪
+          .bind(token, row.file_id, row.name, ip, ua.slice(0, 500), browser, os, country, bytes, Date.now(), codeId)
+          .run();
+      })()
+    );
+  }
+
+  return new Response(body, { status: range ? 206 : 200, headers });
 }
 
 /* ════════════════════════════════════════════════════════════════════

@@ -80,12 +80,17 @@ export function createR2Provider(r2: R2Bucket): StorageProvider {
       return { size: obj.size, etag: obj.httpEtag };
     },
     async get(key, range) {
-      const r2Range = range
+      // ⚠️ 必须用 R2 的 `{ range: { offset, length } }` 形式。
+      // 直接把 `{ offset, length }` 当作顶层参数传进去会被 R2 忽略（R2GetOptions 只认
+      // onlyIf / range），于是**返回整个对象**——断点续传 / 多线程分片 / 媒体 seek 都会
+      // 拿到完整文件却对外声称是局部内容：轻则文件损坏无法合并，重则每片都跑满整份文件、
+      // 流量被成倍刷爆。
+      const r2Range: R2Range | undefined = range
         ? range.length !== undefined
           ? { offset: range.offset, length: range.length }
           : { offset: range.offset }
         : undefined;
-      const obj = (await r2.get(key, r2Range as any)) as any;
+      const obj = (await r2.get(key, r2Range ? { range: r2Range } : undefined)) as any;
       if (!obj) return null;
       return {
         body: obj.body as ReadableStream<Uint8Array>,
@@ -195,9 +200,10 @@ function buildCanonicalRequest(
 
 /** HMAC-SHA256 */
 async function hmacSha256(key: ArrayBuffer | Uint8Array, data: string): Promise<ArrayBuffer> {
+  const rawKey: Uint8Array = key instanceof Uint8Array ? key : new Uint8Array(key);
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    key instanceof Uint8Array ? key.buffer : key,
+    rawKey,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
@@ -208,6 +214,22 @@ async function hmacSha256(key: ArrayBuffer | Uint8Array, data: string): Promise<
 async function sha256Hex(data: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data));
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * 对**原始字节**做 SHA-256 —— 用于 AWS SigV4 的 `x-amz-content-sha256`。
+ *
+ * ⚠️ 绝对不能先把二进制当 UTF-8 文本 decode 再哈希：二进制内容中的非法 UTF-8 字节会被
+ * 替换成 U+FFFD，哈希与真实字节不一致 → S3 签名校验失败（403）→ 文件实际没写进存储。
+ * 这里额外把入参拷进一个全新的 Uint8Array，保证底层 buffer 是 ArrayBuffer
+ * （crypto.subtle.digest 不接受 SharedArrayBuffer 视图）。
+ */
+async function sha256HexBytes(data: ArrayBufferLike | Uint8Array): Promise<string> {
+  const src = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const view = new Uint8Array(src.byteLength);
+  view.set(src);
+  const buf = await crypto.subtle.digest("SHA-256", view);
+  return bufToHex(buf);
 }
 
 function bufToHex(buf: ArrayBuffer): string {
@@ -354,9 +376,12 @@ export function createS3Provider(cfg: S3Config): StorageProvider {
         bodyHash = "UNSIGNED-PAYLOAD";
         fetchBody = opts.body;
       } else if (opts.body instanceof Uint8Array || opts.body instanceof ArrayBuffer) {
-        const buf = opts.body instanceof ArrayBuffer ? opts.body : opts.body.buffer;
-        bodyHash = await sha256Hex(new TextDecoder().decode(buf));
-        fetchBody = buf;
+        const bytes = opts.body instanceof Uint8Array ? opts.body : new Uint8Array(opts.body);
+        // ⚠️ 必须对**原始字节**做 SHA-256（AWS SigV4 的 x-amz-content-sha256）。
+        // 旧实现把二进制当 UTF-8 文本 decode 再哈希 —— 二进制内容会被替换字符损坏，
+        // 哈希与真实字节不一致 → 签名校验失败 → S3 PUT 403 → 上传的文件实际没写进存储。
+        bodyHash = await sha256HexBytes(bytes);
+        fetchBody = bytes;
       }
     }
 
@@ -394,7 +419,17 @@ export function createS3Provider(cfg: S3Config): StorageProvider {
       const size = body instanceof Uint8Array ? body.byteLength
         : body instanceof ArrayBuffer ? body.byteLength
         : body instanceof ReadableStream ? -1 : 0;
-      return { size: size >= 0 ? size : 0, etag: resp.headers.get("etag")?.replace(/"/g, "") || undefined };
+      let finalSize = size >= 0 ? size : 0;
+      // ReadableStream（admin 流式上传）：PUT 响应不返回对象大小，必须补一个 HEAD 拿真实字节数。
+      // 否则 D1 会把文件记成 size=0 → 下载时 content-length / content-range 全错、Range 计算越界，
+      // 表现为"文件下不动 / 下出来是空的 / 断点续传报 416"。
+      if (size < 0) {
+        try {
+          const h = await doFetch("HEAD", key, { expectNoBody: true });
+          if (h.ok) finalSize = parseInt(h.headers.get("Content-Length") || "0", 10) || 0;
+        } catch { /* 拿不到大小就保持 0，至少对象已写入 */ }
+      }
+      return { size: finalSize, etag: resp.headers.get("etag")?.replace(/"/g, "") || undefined };
     },
 
     async get(key, range) {
@@ -414,8 +449,13 @@ export function createS3Provider(cfg: S3Config): StorageProvider {
         const text = await resp.text().catch(() => resp.statusText);
         throw new Error(`S3 GET failed: ${resp.status} ${text}`);
       }
-      const sizeStr = resp.headers.get("Content-Length") || resp.headers.get("x-amz-meta-size") || "0";
-      const size = parseInt(sizeStr, 10) || 0;
+      let size = parseInt(resp.headers.get("Content-Length") || resp.headers.get("x-amz-meta-size") || "0", 10) || 0;
+      // Range 请求时 Content-Length 只是这一段的长度；完整对象大小在 Content-Range 的 "/total" 里。
+      const contentRange = resp.headers.get("Content-Range");
+      if (contentRange) {
+        const total = contentRange.split("/")[1];
+        if (total && total !== "*") size = parseInt(total, 10) || size;
+      }
       return {
         body: resp.body!,
         size,
@@ -649,9 +689,18 @@ export function createWebDAVProvider(cfg: WebDAVConfig): StorageProvider {
       }
 
       const resp = await doFetch("PUT", key, { headers: hdrs, body: body as any });
-      const size = body instanceof Uint8Array ? body.byteLength
+      let size = body instanceof Uint8Array ? body.byteLength
         : body instanceof ArrayBuffer ? body.byteLength
-        : 0;
+        : -1;
+      // ReadableStream（admin / WebDAV 流式上传）：PUT 响应不返回对象大小，必须补 HEAD 拿真实字节数。
+      // 旧实现对 stream 直接返回 0 → D1 记成 size=0 → 下载时 content-length 为 0，文件"下出来是空的"，
+      // 断点续传 / Range 也全部错乱。与 S3 provider 的处理保持一致。
+      if (size < 0) {
+        try {
+          const h = await doFetch("HEAD", key, { expected: [200, 207, 404, 403], noThrow: true });
+          size = h.ok ? parseInt(h.headers.get("Content-Length") || "0", 10) || 0 : 0;
+        } catch { size = 0; }
+      }
       return { size, etag: resp.headers.get("etag") || undefined };
     },
 
@@ -671,9 +720,17 @@ export function createWebDAVProvider(cfg: WebDAVConfig): StorageProvider {
       if (!resp.ok) throw new Error(`WebDAV GET failed: ${resp.status}`);
 
       const sizeStr = resp.headers.get("Content-Length") || "0";
+      let size = parseInt(sizeStr, 10) || 0;
+      // Range 请求时 Content-Length 只是这一段的长度；完整对象大小在 Content-Range 的 "/total" 里。
+      // 与 S3 provider 一致：否则调用方会把"分段长度"当成对象总大小，Content-Range / 续传计算全错。
+      const contentRange = resp.headers.get("Content-Range");
+      if (contentRange) {
+        const total = contentRange.split("/")[1];
+        if (total && total !== "*") size = parseInt(total, 10) || size;
+      }
       return {
         body: resp.body!,
-        size: parseInt(sizeStr, 10) || 0,
+        size,
         contentType: resp.headers.get("Content-Type") || "application/octet-stream",
         etag: resp.headers.get("ETag") || "",
       };

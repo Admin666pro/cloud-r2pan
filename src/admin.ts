@@ -52,6 +52,252 @@ function sanitizeName(name: string): string {
   return cleaned || "unnamed";
 }
 
+/* ═══════════ 虚拟目录路径工具 ═══════════
+ * 约定（与 WebDAV 完全一致，两者共用同一套数据）：
+ *   · directories.path —— 目录路径，根目录为 "/"，如 "/docs"、"/docs/2026"
+ *   · files.path       —— 文件的**全路径**（含文件名），如 "/a.txt"、"/docs/a.txt"
+ * 旧的 admin 上传把 files.path 留成了默认值 "/"，导致文件在 WebDAV 树里消失；
+ * 现在统一走 joinFullPath() 计算，并在迁移里把历史 "/" 行补齐。
+ */
+function normDir(p: string | null | undefined): string {
+  let s = (p ?? "").trim();
+  if (!s) return "/";
+  if (!s.startsWith("/")) s = "/" + s;
+  s = s.replace(/\/+/g, "/");
+  if (s.length > 1 && s.endsWith("/")) s = s.slice(0, -1);
+  return s;
+}
+/** 目录 + 文件名 → 文件全路径 */
+function joinFullPath(dir: string, name: string): string {
+  const d = normDir(dir);
+  return d === "/" ? `/${name}` : `${d}/${name}`;
+}
+/** 文件全路径 → 所在目录 */
+function dirOfFullPath(fullPath: string): string {
+  const i = (fullPath || "").lastIndexOf("/");
+  return i <= 0 ? "/" : fullPath.slice(0, i);
+}
+/** 路径合法性：绝对、无 ".."、无控制字符 */
+function isSafePath(p: string): boolean {
+  return p.startsWith("/") && !p.includes("..") && !/[\u0000-\u001f\u007f]/.test(p);
+}
+/** 目录是否存在（directories 表，或已有文件位于其下） */
+async function dirExists(env: Env, dir: string): Promise<boolean> {
+  const d = normDir(dir);
+  if (d === "/") return true;
+  const one = await env.db.prepare("SELECT 1 FROM directories WHERE path = ?1").bind(d).first();
+  if (one) return true;
+  const child = await env.db.prepare("SELECT 1 FROM files WHERE path LIKE ?1 ESCAPE '\\' LIMIT 1").bind(likePrefix(d + "/")).first();
+  return !!child;
+}
+/** 逐级补齐目录行（如 /a/b/c → /a、/a/b、/a/b/c），供上传/移动时自动建目录 */
+async function ensureDirChain(env: Env, dir: string): Promise<void> {
+  const d = normDir(dir);
+  if (d === "/") return;
+  const now = Date.now();
+  const stmts = [];
+  const parts = d.split("/").filter(Boolean);
+  let acc = "";
+  for (const p of parts) {
+    acc += "/" + p;
+    stmts.push(
+      env.db
+        .prepare("INSERT INTO directories(path, created_at) VALUES(?1, ?2) ON CONFLICT(path) DO NOTHING")
+        .bind(acc, now)
+    );
+  }
+  if (stmts.length) await env.db.batch(stmts);
+}
+/** 列出某目录的直接子目录与直接子文件（与 WebDAV listDirChildren 同源逻辑） */
+async function listDir(env: Env, dir: string): Promise<{ files: any[]; dirs: { path: string; name: string }[] }> {
+  const d = normDir(dir);
+  const prefix = d === "/" ? "/" : d + "/";
+  const { results } = await env.db
+    .prepare(
+      `SELECT f.id, f.name, f.size, f.mime, f.uploaded_at, f.path,
+              (SELECT COUNT(*) FROM shares s WHERE s.file_id = f.id) AS share_count,
+              (SELECT COALESCE(SUM(s.download_count), 0) FROM shares s WHERE s.file_id = f.id) AS download_count
+       FROM files f WHERE f.path LIKE ?1 ESCAPE '\\'`
+    )
+    .bind(prefix === "/" ? "/%" : likePrefix(prefix))
+    .all<any>();
+  const dirSet = new Set<string>();
+  const files: any[] = [];
+  for (const f of results ?? []) {
+    // 兼容历史脏数据：早期 admin 上传把 path 留成了默认值 "/"，这里按 "name" 还原到根目录
+    let full = (f.path as string) || "/";
+    if (full === "/") full = "/" + f.name;
+    const rest = d === "/" ? full.slice(1) : full.slice(prefix.length);
+    if (!rest) continue;
+    const slash = rest.indexOf("/");
+    if (slash < 0) files.push({ ...f, path: full });   // 直接子文件
+    else dirSet.add(prefix + rest.slice(0, slash));    // 更深层 → 归属某个子目录
+  }
+  files.sort((a, b) => (b.uploaded_at ?? 0) - (a.uploaded_at ?? 0));
+  // directories 表里显式创建（可能是空目录）的后代
+  const { results: dirRows } = await env.db
+    .prepare("SELECT path FROM directories WHERE path LIKE ?1 ESCAPE '\\' AND path != ?2")
+    .bind(prefix === "/" ? "/%" : likePrefix(prefix), d)
+    .all<{ path: string }>();
+  for (const r of dirRows ?? []) {
+    const rest = (r.path as string).slice(prefix.length);
+    if (!rest) continue;
+    const slash = rest.indexOf("/");
+    dirSet.add(prefix + (slash < 0 ? rest : rest.slice(0, slash)));
+  }
+  const dirs = Array.from(dirSet)
+    .sort()
+    .map((p) => ({ path: p, name: p.split("/").filter(Boolean).pop() || p }));
+  return { files, dirs };
+}
+
+/** 按全路径查文件（path 即含文件名的全路径） */
+async function findFileByPath(env: Env, fullPath: string): Promise<{ id: string; key: string } | null> {
+  return await env.db
+    .prepare("SELECT id, key FROM files WHERE path = ?1")
+    .bind(fullPath)
+    .first<{ id: string; key: string }>();
+}
+/** 某路径上是否已存在文件 */
+async function fileExistsAt(env: Env, fullPath: string): Promise<boolean> {
+  const row = await env.db.prepare("SELECT 1 FROM files WHERE path = ?1").bind(fullPath).first();
+  return !!row;
+}
+
+/**
+ * 预检目标全路径是否被占用 —— 防止「文件 / 目录同名」造成数据不一致。
+ * 上传用 fileOnly=true（同名目录会阻断），移动/改名用 fileOnly=false（任何占用都阻断）。
+ *
+ * 为什么需要：files.path 与 directories.path 是两套键，若同一路径既是文件又是目录，
+ * listDir 里该名字会**同时**出现成文件行和目录行，删除时哪个先命中也无法确定 —— 是典型的数据损坏源。
+ */
+async function pathTaken(env: Env, fullPath: string, fileOnly: boolean): Promise<"file" | "dir" | null> {
+  if (await fileExistsAt(env, fullPath)) return "file";
+  if (!fileOnly && (await dirExists(env, fullPath))) return "dir";
+  return null;
+}
+
+/** 目录链上是否有某个祖先已经是文件（否则会出现「文件里面再建目录」的非法状态） */
+async function findAncestorFile(env: Env, dir: string): Promise<string | null> {
+  const parts = normDir(dir).split("/").filter(Boolean);
+  let acc = "";
+  for (const p of parts) {
+    acc += "/" + p;
+    if (await fileExistsAt(env, acc)) return acc;
+  }
+  return null;
+}
+
+/** 目录下是否还有文件或子目录（用于移动时避免静默覆盖非空目录） */
+async function dirHasChildren(env: Env, dir: string): Promise<boolean> {
+  const like = likePrefix(normDir(dir) + "/");
+  const f = await env.db.prepare("SELECT 1 FROM files WHERE path LIKE ?1 ESCAPE '\\' LIMIT 1").bind(like).first();
+  if (f) return true;
+  const d = await env.db.prepare("SELECT 1 FROM directories WHERE path LIKE ?1 ESCAPE '\\' LIMIT 1").bind(like).first();
+  return !!d;
+}
+
+/** LIKE 前缀转义：把路径里的 \ % _ 转义，避免 "%" 被当成通配符误伤其它目录 */
+function likePrefix(prefix: string): string {
+  return prefix.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_") + "%";
+}
+
+/** D1 batch 单次语句数有上限，按块提交 */
+async function runBatched(env: Env, stmts: D1PreparedStatement[], chunk = 60): Promise<void> {
+  for (let i = 0; i < stmts.length; i += chunk) {
+    await env.db.batch(stmts.slice(i, i + chunk));
+  }
+}
+
+/**
+ * 删除一个路径（文件或目录）。
+ *   · 文件 → 连带 shares / download_logs / 存储对象
+ *   · 目录 → 递归删除其下所有文件与子目录记录（含空的显式目录）
+ * 返回是否真的删掉了东西。
+ */
+async function fsDeletePath(env: Env, target: string): Promise<boolean> {
+  const st = await storage(env);
+
+  // ① 精确匹配到文件
+  const file = await findFileByPath(env, target);
+  if (file) {
+    await env.db.batch([
+      env.db.prepare("DELETE FROM shares WHERE file_id = ?1").bind(file.id),
+      env.db.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(file.id),
+      env.db.prepare("DELETE FROM files WHERE id = ?1").bind(file.id),
+    ]);
+    await st.delete(file.key).catch(() => {});
+    return true;
+  }
+
+  // ② 目录（directories 表记录，或只是有文件在它下面）
+  const existed = await dirExists(env, target);
+  if (!existed) return false;
+
+  const childLike = likePrefix(target + "/");
+  const { results: files } = await env.db
+    .prepare("SELECT id, key FROM files WHERE path LIKE ?1 ESCAPE '\\'")
+    .bind(childLike)
+    .all<{ id: string; key: string }>();
+  const stmts: D1PreparedStatement[] = [];
+  const keys: string[] = [];
+  for (const f of files ?? []) {
+    stmts.push(env.db.prepare("DELETE FROM shares WHERE file_id = ?1").bind(f.id));
+    stmts.push(env.db.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(f.id));
+    stmts.push(env.db.prepare("DELETE FROM files WHERE id = ?1").bind(f.id));
+    keys.push(f.key);
+  }
+  stmts.push(env.db.prepare("DELETE FROM directories WHERE path = ?1 OR path LIKE ?2 ESCAPE '\\'").bind(target, childLike));
+  await runBatched(env, stmts);
+  await Promise.all(keys.map((k) => st.delete(k).catch(() => {})));
+  return true;
+}
+
+/**
+ * 移动 / 重命名一个路径（文件或目录，from / to 都是全路径）。
+ * 目录会连同所有后代一起迁移（递归改 path 前缀 + directories 记录）。
+ */
+async function fsMoveEntry(env: Env, from: string, to: string): Promise<void> {
+  const nameOf = (p: string) => p.split("/").filter(Boolean).pop() || "unnamed";
+
+  // ① 文件
+  const file = await findFileByPath(env, from);
+  if (file) {
+    await env.db
+      .prepare("UPDATE files SET path = ?1, name = ?2 WHERE id = ?3")
+      .bind(to, nameOf(to), file.id)
+      .run();
+    return;
+  }
+
+  // ② 目录 —— 递归改所有后代文件的 path
+  const childLike = likePrefix(from + "/");
+  const stmts: D1PreparedStatement[] = [];
+  const { results: files } = await env.db
+    .prepare("SELECT id, path FROM files WHERE path LIKE ?1 ESCAPE '\\'")
+    .bind(childLike)
+    .all<{ id: string; path: string }>();
+  for (const f of files ?? []) {
+    stmts.push(env.db.prepare("UPDATE files SET path = ?1 WHERE id = ?2").bind(to + f.path.slice(from.length), f.id));
+  }
+
+  // 子目录记录：先删旧路径再插新路径（path 是主键，直接改会冲突）
+  const { results: dirs } = await env.db
+    .prepare("SELECT path FROM directories WHERE path = ?2 OR path LIKE ?1 ESCAPE '\\'")
+    .bind(childLike, from)
+    .all<{ path: string }>();
+  for (const d of dirs ?? []) {
+    stmts.push(env.db.prepare("DELETE FROM directories WHERE path = ?1").bind(d.path));
+    stmts.push(
+      env.db
+        .prepare("INSERT INTO directories(path, created_at) VALUES(?1, ?2) ON CONFLICT(path) DO NOTHING")
+        .bind(to + d.path.slice(from.length), Date.now())
+    );
+  }
+  await runBatched(env, stmts);
+}
+
+
 /** 生成带文件名后缀的直链 URL：/d/{token}/{filename}，文件名做 URL 编码 */
 function buildDirectUrl(token: string, fileName?: string | null, downloadName?: string | null): string {
   const displayName = downloadName?.trim() || fileName?.trim();
@@ -465,17 +711,32 @@ export async function handleAdminApi(
   }
 
   // ── 文件列表 ──────────────────────────────────────
+  //   GET /api/admin/files                  → 根目录内容（子目录 + 子文件）
+  //   GET /api/admin/files?path=/docs       → 指定目录内容
+  //   GET /api/admin/files?q=keyword        → 全盘按文件名搜索
   if (path === "/api/admin/files" && method === "GET") {
-    const { results } = await env.db.prepare(
-      `SELECT f.id, f.name, f.size, f.mime, f.uploaded_at,
-              (SELECT COUNT(*) FROM shares s WHERE s.file_id = f.id) AS share_count,
-              (SELECT COALESCE(SUM(s.download_count), 0) FROM shares s WHERE s.file_id = f.id) AS download_count
-       FROM files f ORDER BY f.uploaded_at DESC`
-    ).all();
-    return json({ files: results ?? [] });
+    const u = new URL(req.url);
+    const q = (u.searchParams.get("q") ?? "").trim();
+    if (q) {
+      const esc = q.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+      const { results } = await env.db.prepare(
+        `SELECT f.id, f.name, f.size, f.mime, f.uploaded_at, f.path,
+                (SELECT COUNT(*) FROM shares s WHERE s.file_id = f.id) AS share_count,
+                (SELECT COALESCE(SUM(s.download_count), 0) FROM shares s WHERE s.file_id = f.id) AS download_count
+         FROM files f WHERE f.name LIKE ?1 ESCAPE '\\' ORDER BY f.uploaded_at DESC LIMIT 200`
+      ).bind(`%${esc}%`).all();
+      return json({ files: results ?? [], dirs: [], path: "/", search: q });
+    }
+    const dir = normDir(u.searchParams.get("path"));
+    if (!isSafePath(dir)) return json({ error: msg(req, "路径不合法", "Invalid path") }, 400);
+    const { files, dirs } = await listDir(env, dir);
+    return json({ files, dirs, path: dir });
   }
 
-  // ── 上传文件（原始流式 body，文件名放 X-File-Name 头） ──
+  // ── 上传文件（原始流式 body，文件名放 X-File-Name 头，目标目录放 ?path=） ──
+  //   POST /api/admin/upload                        → 上传到根目录
+  //   POST /api/admin/upload?path=/docs/2026        → 上传到指定目录（目录链自动创建）
+  //   同名文件已存在时覆盖（连带清理旧文件记录 / 分享 / 存储对象）
   if (path === "/api/admin/upload" && method === "POST") {
     const rawName = req.headers.get("x-file-name");
     if (!rawName) return json({ error: msg(req, "缺少 X-File-Name 头", "Missing X-File-Name header") }, 400);
@@ -485,11 +746,35 @@ export async function handleAdminApi(
     } catch {
       name = sanitizeName(rawName);
     }
+    const dir = normDir(new URL(req.url).searchParams.get("path"));
+    if (!isSafePath(dir)) return json({ error: msg(req, "路径不合法", "Invalid path") }, 400);
     if (!req.body) return json({ error: msg(req, "请求体为空", "Empty request body") }, 400);
+    // 目标目录链上不能已经有同名文件，否则会造出「文件里建目录」的非法结构
+    const dirConflict = await findAncestorFile(env, dir);
+    if (dirConflict)
+      return json({ error: msg(req, `路径「${dirConflict}」已是一个文件`, `Path "${dirConflict}" is a file`) }, 409);
+    const fullPath = joinFullPath(dir, name);
+    // 同名目录已存在 → 拒绝（否则同一路径既是文件又是目录，列表/删除都会错乱）
+    if (await dirExists(env, fullPath))
+      return json({ error: msg(req, "同名文件夹已存在", "A folder with the same name exists") }, 409);
+    // 自动补建目标目录链（/a/b/c → /a、/a/b、/a/b/c）
+    await ensureDirChain(env, dir);
+    const st = await storage(env);
+    // 同名覆盖：先删掉旧文件（含 shares / download_logs / 旧存储对象），避免同名重复条目
+    const existing = await findFileByPath(env, fullPath);
+    if (existing) {
+      await env.db.batch([
+        env.db.prepare("DELETE FROM shares WHERE file_id = ?1").bind(existing.id),
+        env.db.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(existing.id),
+        env.db.prepare("DELETE FROM files WHERE id = ?1").bind(existing.id),
+      ]);
+      ctx.waitUntil(st.delete(existing.key).catch(() => {}));
+    }
     const id = randomId(14);
     const key = `files/${id}`;
     const mime = req.headers.get("content-type") || "application/octet-stream";
-    const st = await storage(env);
+    // 请求体真实长度（浏览器上传时总会带 Content-Length）—— 用于兜底校正存储层返回的大小。
+    const declaredLen = parseInt(req.headers.get("content-length") || "", 10) || 0;
     let resultSize = 0;
     try {
       const res = await st.put(key, req.body, {
@@ -497,25 +782,103 @@ export async function handleAdminApi(
         contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
       });
       resultSize = res.size;
+      // 某些存储后端（WebDAV / 部分 S3 兼容实现）对流式 PUT 无法取到大小而返回 0，
+      // 若直接落库会让下载端 content-length=0 —— 文件"下出来是空的"。用请求头 / HEAD 兜底。
+      if (resultSize <= 0) {
+        if (declaredLen > 0) resultSize = declaredLen;
+        else {
+          const meta = await st.head(key).catch(() => null);
+          if (meta?.size) resultSize = meta.size;
+        }
+      }
     } catch (err: any) {
       return json({ error: msg(req, "存储写入失败", "Storage write failed"), detail: String(err?.message || err) }, 500);
     }
     // ── Bug #4 修复：D1 写入失败时清理已写入的 storage 对象 ──
     try {
       await env.db.prepare(
-        "INSERT INTO files(id, key, name, size, mime, uploaded_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6)"
+        "INSERT INTO files(id, key, name, size, mime, path, uploaded_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)"
       )
-        .bind(id, key, name, resultSize, mime, Date.now())
+        .bind(id, key, name, resultSize, mime, fullPath, Date.now())
         .run();
     } catch (dbErr) {
       ctx.waitUntil(st.delete(key).catch(() => {}));
       console.error("upload: D1 insert failed, cleaned up storage object:", dbErr);
       return json({ error: msg(req, "数据库写入失败，请重试", "Database write failed. Please retry.") }, 500);
     }
-    return json({ ok: true, id, name, size: resultSize }, 201);
+    return json({ ok: true, id, name, size: resultSize, path: fullPath }, 201);
+  }
+
+  // ── 新建目录 ──────────────────────────────────────
+  //   POST /api/admin/dirs  { dir, name } → 在 dir 下新建 name 目录（父目录链自动创建）
+  if (path === "/api/admin/dirs" && method === "POST") {
+    const body = await readJson<{ dir?: string; name?: string }>(req);
+    const dir = normDir(body.dir);
+    const name = sanitizeName(String(body.name ?? "").trim());
+    if (!name || !isSafePath(dir)) return json({ error: msg(req, "目录名不合法", "Invalid folder name") }, 400);
+    const full = joinFullPath(dir, name);
+    const occupied = await pathTaken(env, full, false);
+    if (occupied === "file") return json({ error: msg(req, "同名文件已存在", "A file with the same name exists") }, 409);
+    if (occupied === "dir") return json({ ok: true, path: full, existed: true }, 200); // 幂等 mkdir
+    await ensureDirChain(env, full);
+    return json({ ok: true, path: full }, 201);
+  }
+
+  // ── 移动 / 重命名（文件或目录，全路径 from → to） ──
+  //   POST /api/admin/fs/move  { from, to }
+  //   · 目录连同其下所有子项一起移动（递归改 path 前缀）
+  //   · 目标父目录不存在时自动创建；目标已存在时覆盖
+  if (path === "/api/admin/fs/move" && method === "POST") {
+    const body = await readJson<{ from?: string; to?: string }>(req);
+    const from = normDir(body.from);
+    const to = normDir(body.to);
+    if (!isSafePath(from) || !isSafePath(to) || from === "/" || to === "/")
+      return json({ error: msg(req, "路径不合法", "Invalid path") }, 400);
+    if (from === to) return json({ ok: true, from, to });
+    // 禁止把目录移动进它自己的子目录（否则会形成自引用 / 数据丢失）
+    if (to.startsWith(from + "/"))
+      return json({ error: msg(req, "不能移动到自身子目录", "Cannot move into its own subfolder") }, 400);
+    const srcIsFile = await fileExistsAt(env, from);
+    const srcIsDir = await dirExists(env, from);
+    if (!srcIsFile && !srcIsDir) return json({ error: msg(req, "源不存在", "Source not found") }, 404);
+    // 目标父目录自动补建 —— 但父链上不能有同名文件（否则会出现「文件里建目录」的非法状态）
+    const parent = dirOfFullPath(to);
+    const anc = await findAncestorFile(env, parent);
+    if (anc) return json({ error: msg(req, `目标父路径「${anc}」已是一个文件`, `Target parent path "${anc}" is a file`) }, 409);
+    await ensureDirChain(env, parent);
+    // 目标已存在 → 拒绝，绝不静默覆盖 / 删除（旧实现会直接把目标删掉，极易误删数据）
+    const toTaken = await pathTaken(env, to, false);
+    if (toTaken === "file")
+      return json({ error: msg(req, "目标路径已存在同名文件", "A file already exists at the target path") }, 409);
+    if (toTaken === "dir") {
+      if (srcIsFile)
+        return json({ error: msg(req, "目标路径已存在同名目录", "A folder already exists at the target path") }, 409);
+      // 目录 → 已有目录：允许将空目录并入；两侧都有内容时拒绝，避免同名文件互相覆盖
+      if ((await dirHasChildren(env, to)) && (await dirHasChildren(env, from)))
+        return json({ error: msg(req, "目标目录非空，无法合并", "Target folder is not empty") }, 409);
+    }
+    await fsMoveEntry(env, from, to);
+    return json({ ok: true, from, to });
+  }
+
+  // ── 批量删除（文件 / 目录，按全路径；目录递归删除） ──
+  //   POST /api/admin/fs/delete  { paths: ["/a.txt", "/docs"] }
+  if (path === "/api/admin/fs/delete" && method === "POST") {
+    const body = await readJson<{ paths?: unknown }>(req);
+    const raw = Array.isArray(body.paths) ? body.paths : [];
+    const targets = (raw as unknown[])
+      .map((p) => normDir(typeof p === "string" ? p : ""))
+      .filter((p) => p !== "/" && isSafePath(p));
+    if (!targets.length) return json({ error: msg(req, "缺少有效路径", "No valid paths") }, 400);
+    let deleted = 0;
+    for (const t of targets) {
+      if (await fsDeletePath(env, t)) deleted++;
+    }
+    return json({ ok: true, deleted });
   }
 
   // ── 删除文件（连带存储对象、分享、日志） ──────────
+  //   保留按 id 的旧接口，兼容旧前端
   const fileMatch = /^\/api\/admin\/files\/([^/]+)$/.exec(path);
   if (fileMatch && method === "DELETE") {
     const fileId = fileMatch[1];
@@ -1943,7 +2306,7 @@ export async function handleAdminApi(
         const prov = createS3Provider(cfg);
         const testKey = `_r2pan-test-${Date.now()}`;
         // 写一个测试对象
-        await prov.put(testKey, new TextEncoder().encode("cloud-r2pan storage test").buffer, {
+        await prov.put(testKey, new TextEncoder().encode("cloud-r2pan storage test"), {
           contentType: "text/plain",
         });
         // 读回验证

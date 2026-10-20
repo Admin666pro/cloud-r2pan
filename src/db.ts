@@ -68,6 +68,17 @@ const SCHEMA_STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_logs_share_ip ON download_logs(share_id, ip, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_logs_created ON download_logs(created_at)`,
+  // 下载会话：把"同一次下载"的并发分片/断点续传归并成一次计次，
+  // 防止多线程下载器瞬间刷爆 max_downloads / 每 IP 限次并触发自动封禁。
+  `CREATE TABLE IF NOT EXISTS download_sessions (
+    share_id TEXT NOT NULL,
+    ip TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    counted INTEGER NOT NULL DEFAULT 0,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(share_id, ip)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_download_sessions_created ON download_sessions(created_at)`,
   `CREATE TABLE IF NOT EXISTS login_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     action TEXT NOT NULL,
@@ -190,7 +201,7 @@ export const EXPECTED_TABLES = [
   "files", "shares", "direct_links", "download_logs", "login_logs",
   "turnstile_visits", "banned_ips", "settings", "traffic_stats",
   "oauth_states", "oauth_providers", "activation_plans", "activation_codes",
-  "directories", "error_logs",
+  "directories", "error_logs", "download_sessions",
 ];
 
 let schemaReady = false;
@@ -230,6 +241,19 @@ const MIGRATION_STATEMENTS: string[] = [
   // ═══════════ 在线预览次数限制（独立于下载次数） ═══════════
   "ALTER TABLE shares ADD COLUMN max_previews INTEGER",
   "ALTER TABLE shares ADD COLUMN preview_count INTEGER NOT NULL DEFAULT 0",
+  // ═══════════ 下载会话准入标记（修复"满额后并发白嫖"绕过） ═══════════
+  "ALTER TABLE download_sessions ADD COLUMN counted INTEGER NOT NULL DEFAULT 0",
+  // ═══════════ 文件系统：修正历史遗留的 files.path = '/' ═══════════
+  // 约定 files.path 存**含文件名的全路径**（如 "/a.txt"、"/docs/a.txt"），
+  // 但早期 admin 上传漏写 path → 留成默认值 "/"，导致文件在目录树里"消失"（listDir 跳过）。
+  // 这里把历史行补成 "/" + name，一次性修正。
+  "UPDATE files SET path = '/' || name WHERE path IS NULL OR path = '/'",
+  // ═══════════ 下载会话字节预算（修复"TTL 内无限续传"绕过） ═══════════
+  // 会话累计已发送字节，累计满一整份文件后立即结束会话；否则同一 IP 在 10 分钟窗口内
+  // 可以无限次"续传"把整个文件反复拉走，max_downloads 形同虚设。
+  // ⚠️ 新增迁移必须**追加在数组末尾**：迁移按 version 顺序只跑一次，
+  //    插在中间会被已有库的 migration_version 跳过。
+  "ALTER TABLE download_sessions ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0",
 ];
 
 /**
@@ -409,12 +433,15 @@ const EXPECTED_COLUMNS: { table: string; column: string }[] = [
   { table: "files", column: "path" },
   { table: "shares", column: "max_previews" },
   { table: "shares", column: "preview_count" },
+  { table: "download_sessions", column: "counted" },
+  { table: "download_sessions", column: "bytes" },
 ];
 
 /** 预期的索引（同样是可能缺失的） */
 const EXPECTED_INDEXES: string[] = [
   "idx_shares_market",
   "idx_files_path",
+  "idx_download_sessions_created",
 ];
 
 export interface SchemaStatus {

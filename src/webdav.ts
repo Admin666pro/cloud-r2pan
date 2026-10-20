@@ -567,6 +567,13 @@ async function handleWebDavPut(
     return new Response("Conflict: parent directory does not exist", { status: 409 });
   }
 
+  const fullPath = dir === "/" ? `/${name}` : `${dir}/${name}`;
+  // 同一路径已是目录 —— 拒绝，否则 files.path 与 directories.path 冲突，
+  // 文件会「藏在」同名目录里，列表里出现两条同名项、删除行为也不确定。
+  if (await directoryExists(env, fullPath)) {
+    return new Response("Conflict: a collection already exists at this path", { status: 409 });
+  }
+
   const mime = req.headers.get("content-type") || "application/octet-stream";
   const st = await storage(env);
 
@@ -582,6 +589,16 @@ async function handleWebDavPut(
       contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
     });
     size = res.size;
+    // 流式 PUT 时部分存储后端拿不到大小而返回 0，会让下载端 content-length=0（文件"下出来是空的"）。
+    // 用 WebDAV 客户端声明的 Content-Length 兜底，取不到再补一次 HEAD。
+    if (size <= 0) {
+      const declared = parseInt(req.headers.get("content-length") || "", 10) || 0;
+      if (declared > 0) size = declared;
+      else {
+        const meta = await st.head(key).catch(() => null);
+        if (meta?.size) size = meta.size;
+      }
+    }
   } catch (err: any) {
     return new Response(`Storage error: ${err?.message || err}`, { status: 502 });
   }
@@ -601,7 +618,6 @@ async function handleWebDavPut(
   }
 
   // 插入新文件记录
-  const fullPath = dir === "/" ? `/${name}` : `${dir}/${name}`;
   try {
     await env.db.prepare(
       "INSERT INTO files(id, key, name, size, mime, path, uploaded_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)"
@@ -737,6 +753,11 @@ async function handleWebDavMove(
   const srcFile = await pathIsFile(env, internalPath);
   if (!srcExists && !srcFile) {
     return new Response("Not Found", { status: 404 });
+  }
+
+  // 禁止把目录移动到它自己或它的子目录下（否则递归改路径会破坏整棵子树）
+  if (destPath === internalPath || destPath.startsWith(internalPath.replace(/\/$/, "") + "/")) {
+    return new Response("Conflict: cannot move into itself", { status: 409 });
   }
 
   // 目标父目录必须存在

@@ -661,6 +661,20 @@ const I18N = {
     allFiles: '全部文件', noFiles: '还没有文件，上传一个试试', createShare: '创建分享', createDirect: '创建直链', del: '删除',
     tooLarge: '「{name}」超过 100 MB 限制', uploadOk: '「{name}」上传成功', uploadFail: '「{name}」上传失败',
     uploadDone: '完成 ✅', uploadFailShort: '失败',
+    // 文件系统（文件夹浏览 / 搜索 / 新建 / 重命名 / 移动 / 批量删除）
+    fsRoot: '根目录', fsUp: '上级', fsSearchPh: '搜索全部文件…', fsSearching: '搜索“{q}”', fsClear: '清除',
+    newFolder: '新建文件夹', folderNamePh: '文件夹名称',
+    fsNameLabel: '名称', fsDirLabel: '目标目录',
+    fsDirHint: '以 / 开头，如 /docs/2026（不存在会自动创建）',
+    fsMoveTitle: '重命名 / 移动', fsMoveSubFile: '改个名字，或移动到其它目录。',
+    fsMoveSubDir: '重命名，或把整个文件夹（含全部内容）移动到其它目录。',
+    fsNameRequired: '名称不能为空', fsMoved: '已更新', fsFolderCreated: '文件夹已创建',
+    fsOpen: '打开', fsRename: '重命名/移动', fsDeletedN: '已删除 {n} 项',
+    fsDeleteSel: '删除所选', fsDeleteSelT: '批量删除',
+    fsDeleteSelD: '确定删除所选的 {n} 项吗？此操作不可撤销。',
+    fsDeleteDirD: '确定删除文件夹「{name}」及其全部内容？此操作不可撤销。',
+    fsEmptyDir: '这个文件夹是空的', fsSearchEmpty: '没有匹配的文件',
+    fsItemCount: '{f} 个文件 · {d} 个文件夹', fsUploadHere: '拖拽文件到此处，或点击上传（上传到当前文件夹）',
     // 分享弹窗
     shareModalTitle: '创建分享链接', shareModalSub: '生成公开下载链接，可设置有效期与下载次数上限',
     validity: '有效期', perm: '永久有效', h1: '1 小时', d1: '1 天', d7: '7 天', d30: '30 天',
@@ -1094,6 +1108,20 @@ const I18N = {
     allFiles: 'All Files', noFiles: 'No files yet — upload one to get started', createShare: 'Share', createDirect: 'Direct', del: 'Delete',
     tooLarge: '"{name}" exceeds the 100 MB limit', uploadOk: '"{name}" uploaded', uploadFail: '"{name}" upload failed',
     uploadDone: 'Done ✅', uploadFailShort: 'Failed',
+    // File system (folder browse / search / new / rename / move / batch delete)
+    fsRoot: 'Root', fsUp: 'Up', fsSearchPh: 'Search all files…', fsSearching: 'Search "{q}"', fsClear: 'Clear',
+    newFolder: 'New Folder', folderNamePh: 'Folder name',
+    fsNameLabel: 'Name', fsDirLabel: 'Target folder',
+    fsDirHint: 'Starts with /, e.g. /docs/2026 (created automatically if missing)',
+    fsMoveTitle: 'Rename / Move', fsMoveSubFile: 'Rename it, or move it to another folder.',
+    fsMoveSubDir: 'Rename, or move the whole folder (with all contents) to another folder.',
+    fsNameRequired: 'Name is required', fsMoved: 'Updated', fsFolderCreated: 'Folder created',
+    fsOpen: 'Open', fsRename: 'Rename', fsDeletedN: 'Deleted {n} item(s)',
+    fsDeleteSel: 'Delete selected', fsDeleteSelT: 'Batch delete',
+    fsDeleteSelD: 'Delete the {n} selected item(s)? This cannot be undone.',
+    fsDeleteDirD: 'Delete folder "{name}" and everything inside? This cannot be undone.',
+    fsEmptyDir: 'This folder is empty', fsSearchEmpty: 'No matching files',
+    fsItemCount: '{f} file(s) · {d} folder(s)', fsUploadHere: 'Drop files here or click to upload (to the current folder)',
     // 分享弹窗
     shareModalTitle: 'Create Share Link', shareModalSub: 'Generate a public download link with optional expiry and download cap',
     validity: 'Validity', perm: 'Forever', h1: '1 hour', d1: '1 day', d7: '7 days', d30: '30 days',
@@ -2308,67 +2336,263 @@ async function loadOverview(){
   $('#goto-logs').onclick = () => switchTab('logs');
 }
 
-/* ═══════════ 文件 ═══════════ */
-async function loadFiles(){
-  const { files } = await api('/api/admin/files');
+/* ═══════════ 文件（文件夹浏览 + 搜索 + 新建 / 重命名 / 移动 / 批量删除） ═══════════ */
+let _fsDir = '/';       // 当前目录（全路径）
+let _fsQuery = '';      // 搜索词；非空时全盘搜索、忽略 _fsDir
+let _fsSel = new Set();  // 勾选的路径（文件/目录全路径）
+let _fsCount = { f: 0, d: 0 };
+
+const fsParent = p => { const i = p.lastIndexOf('/'); return i <= 0 ? '/' : p.slice(0, i); };
+const fsBase = p => p.split('/').filter(Boolean).pop() || p;
+const fsJoin = (dir, name) => (dir === '/' ? '' : String(dir).replace(/\/+$/, '')) + '/' + name;
+
+/** 面包屑（根 → 当前目录，各级可点击跳转） */
+function fsBreadcrumb(){
+  let acc = '';
+  let html = `<a href="javascript:void(0)" data-fs-dir="/" style="cursor:pointer">🏠 ${esc(t('fsRoot'))}</a>`;
+  for(const p of _fsDir.split('/').filter(Boolean)){
+    acc += '/' + p;
+    html += ` <span style="opacity:.4">/</span> <a href="javascript:void(0)" data-fs-dir="${esc(acc)}" style="cursor:pointer">${esc(p)}</a>`;
+  }
+  return html;
+}
+
+/** 右上角：有勾选时显示「删除所选」，否则显示条目统计 */
+function fsSelZone(){
+  if(_fsSel.size)
+    return `<button class="btn sm danger" id="fs-del-sel">${esc(t('fsDeleteSel'))}（${_fsSel.size}）</button>`;
+  return `<span style="opacity:.6;font-size:13px">${esc(t('fsItemCount', { f: _fsCount.f, d: _fsCount.d }))}</span>`;
+}
+function fsSyncSel(){
+  const z = $('#fs-sel-zone');
+  if(z){ z.innerHTML = fsSelZone(); const b = $('#fs-del-sel'); if(b) b.onclick = fsDeleteSelected; }
+  const all = $('#fs-all');
+  if(all){ all.checked = _fsCount.f + _fsCount.d > 0 && _fsSel.size >= _fsCount.f + _fsCount.d; }
+}
+
+async function loadFiles(dir, q){
+  if(dir !== undefined) _fsDir = dir || '/';
+  if(q !== undefined) _fsQuery = q || '';
+  const params = new URLSearchParams();
+  if(_fsQuery) params.set('q', _fsQuery); else params.set('path', _fsDir);
+  const r = await api('/api/admin/files?' + params.toString());
+  const files = r.files || [];
+  const dirs = _fsQuery ? [] : (r.dirs || []);
+  _fsCount = { f: files.length, d: dirs.length };
+  // 清理已不存在于当前视图的勾选项
+  const alive = new Set([...files.map(f => f.path), ...dirs.map(d => d.path)]);
+  for(const p of [..._fsSel]) if(!alive.has(p)) _fsSel.delete(p);
+
+  const dirRows = dirs.map(d => `
+    <tr>
+      <td><input type="checkbox" data-sel="${esc(d.path)}" ${_fsSel.has(d.path) ? 'checked' : ''}></td>
+      <td colspan="2"><span style="margin-right:8px">📁</span><a href="javascript:void(0)" data-open="${esc(d.path)}" style="cursor:pointer;font-weight:600">${esc(d.name)}</a></td>
+      <td class="num">—</td>
+      <td class="num">—</td>
+      <td class="num">—</td>
+      <td class="num">—</td>
+      <td><div class="actions-cell">
+        <button class="btn sm" data-open="${esc(d.path)}">${esc(t('fsOpen'))}</button>
+        <button class="btn sm" data-rename="${esc(d.path)}" data-name="${esc(d.name)}" data-dir="1">${esc(t('fsRename'))}</button>
+        <button class="btn sm danger" data-delpath="${esc(d.path)}" data-name="${esc(d.name)}" data-dir="1">${esc(t('del'))}</button>
+      </div></td>
+    </tr>`).join('');
+
+  const fileRows = files.map(f => `
+    <tr>
+      <td><input type="checkbox" data-sel="${esc(f.path)}" ${_fsSel.has(f.path) ? 'checked' : ''}></td>
+      <td>${ficon(f.name)}</td>
+      <td class="name-cell" title="${esc(f.path)}">${esc(f.name)}</td>
+      <td class="num">${fmtSize(f.size)}</td>
+      <td class="num">${f.share_count}</td>
+      <td class="num">${f.download_count}</td>
+      <td class="num">${fmtTime(f.uploaded_at)}</td>
+      <td><div class="actions-cell">
+        <button class="btn sm primary" data-share="${f.id}">${esc(t('createShare'))}</button>
+        <button class="btn sm" data-direct="${f.id}" style="background:rgba(250,204,21,0.15);border-color:rgba(250,204,21,0.35);color:#fde68a">${esc(t('createDirect'))}</button>
+        <button class="btn sm" data-rename="${esc(f.path)}" data-name="${esc(f.name)}">${esc(t('fsRename'))}</button>
+        <button class="btn sm danger" data-delpath="${esc(f.path)}" data-name="${esc(f.name)}">${esc(t('del'))}</button>
+      </div></td>
+    </tr>`).join('');
+
+  const isEmpty = !files.length && !dirs.length;
+  const title = _fsQuery
+    ? t('fsSearching', { q: _fsQuery })
+    : (_fsDir === '/' ? t('allFiles') : fsBase(_fsDir));
+
   $('#view').innerHTML = `
+    <div class="glass section" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+      ${_fsQuery ? '' : `<button class="btn sm" id="fs-up" ${_fsDir === '/' ? 'disabled' : ''}>⬆ ${esc(t('fsUp'))}</button>`}
+      ${_fsQuery ? '' : `<button class="btn sm primary" id="fs-newdir">＋ ${esc(t('newFolder'))}</button>`}
+      <div style="flex:1;min-width:150px;font-size:14px">${_fsQuery ? esc(t('fsSearching', { q: _fsQuery })) : fsBreadcrumb()}</div>
+      <input id="fs-search" value="${esc(_fsQuery)}" placeholder="${esc(t('fsSearchPh'))}" style="flex:1;min-width:180px;max-width:320px;padding:9px 13px;border-radius:12px;font-size:14px;font-family:inherit;color:var(--text);background:var(--sf-input);border:1px solid var(--stroke-strong);outline:none">
+      ${_fsQuery ? `<button class="btn sm" id="fs-search-clear">${esc(t('fsClear'))}</button>` : ''}
+    </div>
+    ${_fsQuery ? '' : `
     <div class="dropzone" id="dropzone">
       <div class="icon">☁️</div>
-      <div class="t">${esc(t('dropTitle'))}</div>
+      <div class="t">${esc(t('fsUploadHere'))}</div>
       <div class="d">${esc(t('dropDesc'))}</div>
       <input type="file" id="file-input" multiple hidden>
-    </div>
+    </div>`}
     <div id="upload-list"></div>
     <div class="glass section">
-      <div class="section-title"><h2>📁 ${esc(t('allFiles'))}（${files.length}）</h2></div>
-      ${files.length ? `
+      <div class="section-title">
+        <h2>${_fsQuery ? '🔍' : '📁'} ${esc(title)}</h2>
+        <span id="fs-sel-zone">${fsSelZone()}</span>
+      </div>
+      ${isEmpty ? `<div class="empty"><div class="icon">${_fsQuery ? '🔍' : '📭'}</div>${esc(_fsQuery ? t('fsSearchEmpty') : t('fsEmptyDir'))}</div>` : `
       <div style="overflow-x:auto"><table class="tbl">
-        <thead><tr><th style="width:44px"></th><th>${esc(t('colName'))}</th><th>${esc(t('colSize'))}</th><th>${esc(t('colShareCount'))}</th><th>${esc(t('colDownloads'))}</th><th>${esc(t('colUploaded'))}</th><th style="width:170px">${esc(t('colActions'))}</th></tr></thead>
-        <tbody>${files.map(f => `
-          <tr>
-            <td>${ficon(f.name)}</td>
-            <td class="name-cell" title="${esc(f.name)}">${esc(f.name)}</td>
-            <td class="num">${fmtSize(f.size)}</td>
-            <td class="num">${f.share_count}</td>
-            <td class="num">${f.download_count}</td>
-            <td class="num">${fmtTime(f.uploaded_at)}</td>
-            <td><div class="actions-cell">
-              <button class="btn sm primary" data-share="${f.id}">${esc(t('createShare'))}</button>
-              <button class="btn sm" data-direct="${f.id}" style="background:rgba(250,204,21,0.15);border-color:rgba(250,204,21,0.35);color:#fde68a">${esc(t('createDirect'))}</button>
-              <button class="btn sm danger" data-del="${f.id}" data-name="${esc(f.name)}">${esc(t('del'))}</button>
-            </div></td>
-          </tr>`).join('')}
-        </tbody>
-      </table></div>` : `<div class="empty"><div class="icon">📭</div>${esc(t('noFiles'))}</div>`}
+        <thead><tr>
+          <th style="width:36px"><input type="checkbox" id="fs-all"></th>
+          <th style="width:44px"></th>
+          <th>${esc(t('colName'))}</th>
+          <th>${esc(t('colSize'))}</th>
+          <th>${esc(t('colShareCount'))}</th>
+          <th>${esc(t('colDownloads'))}</th>
+          <th>${esc(t('colUploaded'))}</th>
+          <th style="width:250px">${esc(t('colActions'))}</th>
+        </tr></thead>
+        <tbody>${dirRows}${fileRows}</tbody>
+      </table></div>`}
     </div>`;
 
-  const dz = $('#dropzone'), fi = $('#file-input');
-  dz.onclick = () => fi.click();
-  dz.ondragover = e => { e.preventDefault(); dz.classList.add('over'); };
-  dz.ondragleave = () => dz.classList.remove('over');
-  dz.ondrop = e => { e.preventDefault(); dz.classList.remove('over'); uploadFiles([...e.dataTransfer.files]); };
-  fi.onchange = () => { uploadFiles([...fi.files]); fi.value = ''; };
+  // ── 工具栏 / 导航 ──
+  $$('[data-fs-dir]').forEach(a => a.onclick = () => loadFiles(a.dataset.fsDir, ''));
+  $$('[data-open]').forEach(b => b.onclick = () => loadFiles(b.dataset.open, ''));
+  const up = $('#fs-up'); if(up) up.onclick = () => loadFiles(fsParent(_fsDir), '');
+  const nd = $('#fs-newdir'); if(nd) nd.onclick = openNewFolderModal;
+  const si = $('#fs-search');
+  if(si){
+    si.oninput = () => { clearTimeout(si._t); si._t = setTimeout(() => loadFiles(undefined, si.value.trim()), 350); };
+    si.onkeydown = e => { if(e.key === 'Enter'){ clearTimeout(si._t); loadFiles(undefined, si.value.trim()); } };
+  }
+  const sc = $('#fs-search-clear'); if(sc) sc.onclick = () => loadFiles(undefined, '');
 
+  // ── 勾选 ──
+  $$('[data-sel]').forEach(cb => cb.onchange = () => {
+    if(cb.checked) _fsSel.add(cb.dataset.sel); else _fsSel.delete(cb.dataset.sel);
+    fsSyncSel();
+  });
+  const all = $('#fs-all');
+  if(all) all.onchange = () => {
+    $$('[data-sel]').forEach(cb => { cb.checked = all.checked; if(all.checked) _fsSel.add(cb.dataset.sel); else _fsSel.delete(cb.dataset.sel); });
+    fsSyncSel();
+  };
+  const delSel = $('#fs-del-sel'); if(delSel) delSel.onclick = fsDeleteSelected;
+
+  // ── 行内操作 ──
   $$('[data-share]').forEach(b => b.onclick = () => openShareModal(b.dataset.share));
   $$('[data-direct]').forEach(b => b.onclick = () => openDirectModal(b.dataset.direct));
-  $$('[data-del]').forEach(b => b.onclick = async () => {
-    if(!(await confirmDialog(t('deleteFileT'), t('deleteFileD', {name: b.dataset.name})))) return;
-    await api(`/api/admin/files/${b.dataset.del}`, { method:'DELETE' });
-    toast(t('fileDeleted'));
-    loadFiles();
+  $$('[data-rename]').forEach(b => b.onclick = () => openFsMoveModal(b.dataset.rename, b.dataset.dir === '1', b.dataset.name));
+  $$('[data-delpath]').forEach(b => b.onclick = async () => {
+    const isDir = b.dataset.dir === '1';
+    const ok = await confirmDialog(t('deleteFileT'), isDir
+      ? t('fsDeleteDirD', { name: b.dataset.name })
+      : t('deleteFileD', { name: b.dataset.name }));
+    if(!ok) return;
+    try{
+      await api('/api/admin/fs/delete', { method:'POST', body: JSON.stringify({ paths: [b.dataset.delpath] }) });
+      toast(t('fileDeleted'));
+      loadFiles();
+    }catch(e){ toast(e.message, 'err'); }
   });
+
+  // ── 上传（拖拽 / 点击）──
+  const dz = $('#dropzone'), fi = $('#file-input');
+  if(dz && fi){
+    dz.onclick = () => fi.click();
+    dz.ondragover = e => { e.preventDefault(); dz.classList.add('over'); };
+    dz.ondragleave = () => dz.classList.remove('over');
+    dz.ondrop = e => { e.preventDefault(); dz.classList.remove('over'); uploadFiles([...e.dataTransfer.files]); };
+    fi.onchange = () => { uploadFiles([...fi.files]); fi.value = ''; };
+  }
+}
+
+/** 新建文件夹弹窗 */
+function openNewFolderModal(){
+  openModal(`
+    <h3>${esc(t('newFolder'))}</h3>
+    <div class="sub">${esc(t('fsDirLabel'))}：${esc(_fsDir)}</div>
+    <div class="field"><input id="nf-name" placeholder="${esc(t('folderNamePh'))}"></div>
+    <div class="actions">
+      <button class="btn" data-x>${esc(t('cancel'))}</button>
+      <button class="btn primary" id="nf-do">${esc(t('confirm'))}</button>
+    </div>`);
+  $('[data-x]').onclick = closeModal;
+  $('#nf-do').onclick = async () => {
+    const name = $('#nf-name').value.trim();
+    if(!name) return toast(t('fsNameRequired'), 'err');
+    try{
+      await api('/api/admin/dirs', { method:'POST', body: JSON.stringify({ dir: _fsDir, name }) });
+      toast(t('fsFolderCreated'));
+      closeModal(); loadFiles();
+    }catch(e){ toast(e.message, 'err'); }
+  };
+  setTimeout(() => $('#nf-name')?.focus(), 30);
+}
+
+/** 重命名 / 移动弹窗（文件与目录共用） */
+function openFsMoveModal(path, isDir, curName){
+  openModal(`
+    <h3>${esc(t('fsMoveTitle'))}</h3>
+    <div class="sub">${esc(isDir ? t('fsMoveSubDir') : t('fsMoveSubFile'))}</div>
+    <div class="field">
+      <label>${esc(t('fsNameLabel'))}</label>
+      <input id="fsm-name" value="${esc(curName)}">
+    </div>
+    <div class="field">
+      <label>${esc(t('fsDirLabel'))}</label>
+      <input id="fsm-dir" value="${esc(fsParent(path))}">
+      <div class="tip">${esc(t('fsDirHint'))}</div>
+    </div>
+    <div class="actions">
+      <button class="btn" data-x>${esc(t('cancel'))}</button>
+      <button class="btn primary" id="fsm-do">${esc(t('confirm'))}</button>
+    </div>`);
+  $('[data-x]').onclick = closeModal;
+  $('#fsm-do').onclick = async () => {
+    const nm = $('#fsm-name').value.trim();
+    let dst = $('#fsm-dir').value.trim() || '/';
+    if(!nm) return toast(t('fsNameRequired'), 'err');
+    if(!dst.startsWith('/')) dst = '/' + dst;
+    const to = fsJoin(dst, nm);
+    try{
+      await api('/api/admin/fs/move', { method:'POST', body: JSON.stringify({ from: path, to }) });
+      toast(t('fsMoved'));
+      closeModal(); loadFiles();
+    }catch(e){ toast(e.message, 'err'); }
+  };
+  setTimeout(() => $('#fsm-name')?.focus(), 30);
+}
+
+/** 批量删除已勾选项 */
+async function fsDeleteSelected(){
+  const paths = [..._fsSel];
+  if(!paths.length) return;
+  if(!(await confirmDialog(t('fsDeleteSelT'), t('fsDeleteSelD', { n: paths.length })))) return;
+  try{
+    const r = await api('/api/admin/fs/delete', { method:'POST', body: JSON.stringify({ paths }) });
+    toast(t('fsDeletedN', { n: r.deleted ?? paths.length }));
+    _fsSel.clear();
+    loadFiles();
+  }catch(e){ toast(e.message, 'err'); }
 }
 
 function uploadFiles(files){
+  if(!files.length) return;
+  // 搜索视图下没有 dropzone，回退到根目录上传
+  const targetDir = _fsQuery ? '/' : _fsDir;
+  let failed = 0, done = 0;
   for(const file of files){
-    if(file.size > 100 * 1024 * 1024){ toast(t('tooLarge', {name: file.name}), 'err'); continue; }
+    if(file.size > 100 * 1024 * 1024){ toast(t('tooLarge', {name: file.name}), 'err'); failed++; continue; }
     const item = document.createElement('div');
     item.className = 'upload-item glass';
     item.innerHTML = `${ficon(file.name)}<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(file.name)}</span>
       <div class="prog"><i></i></div><span class="pct">0%</span>`;
     $('#upload-list').prepend(item);
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/admin/upload');
+    xhr.open('POST', '/api/admin/upload?path=' + encodeURIComponent(targetDir));
     xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name));
     xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
     xhr.upload.onprogress = e => {
@@ -2377,8 +2601,14 @@ function uploadFiles(files){
       item.querySelector('.pct').textContent = pct + '%';
     };
     xhr.onload = () => {
-      if(xhr.status === 201){ item.querySelector('.pct').textContent = t('uploadDone'); toast(t('uploadOk', {name: file.name})); loadFiles(); }
-      else { item.querySelector('.pct').textContent = t('uploadFailShort'); toast(t('uploadFail', {name: file.name}), 'err'); }
+      if(xhr.status === 201){
+        item.querySelector('.pct').textContent = t('uploadDone');
+        toast(t('uploadOk', {name: file.name}));
+        if(++done === 1) loadFiles();   // 首个成功即刷新列表
+      } else {
+        item.querySelector('.pct').textContent = t('uploadFailShort');
+        toast(t('uploadFail', {name: file.name}), 'err');
+      }
     };
     xhr.onerror = () => { item.querySelector('.pct').textContent = t('uploadFailShort'); toast(t('uploadFail', {name: file.name}), 'err'); };
     xhr.send(file);

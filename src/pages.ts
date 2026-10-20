@@ -193,7 +193,7 @@ p { font-size: 15px; line-height: 1.65; color: rgba(255,255,255,.78); }
   <h1>${esc(title[lang])}</h1>
   <p>${esc(message[lang])}</p>
   ${loginBtn}
-  <div class="code">HTTP ${status}</div>
+  ${status >= 400 ? `<div class="code">HTTP ${status}</div>` : ""}
 </div>
 <div class="brand">Powered by ${site}</div>
 </body>
