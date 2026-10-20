@@ -244,17 +244,33 @@ async function claimSession(
     .run()
     .catch(() => {});
 
-  // ① 免费续传：已有被准入会话，且本次字节仍在「一份文件 + 重叠余量」预算内 → 原子预占字节
-  const ext = await env.db
-    .prepare(
-      `UPDATE download_sessions SET created_at = ?3, bytes = bytes + ?5
-        WHERE share_id = ?1 AND ip = ?2 AND created_at > ?4
-          AND counted = 1 AND bytes + ?5 <= ?6`
-    )
-    .bind(id, ip, now, fresh, need, cap)
-    .run();
-  if ((ext.meta.changes ?? 0) > 0)
-    return { isNew: false, admitted: true, claimed: false, sessionAt: now };
+  // ① 免费续传：已有被准入会话，且本次字节仍在「一份文件 + 重叠余量」预算内 → 原子预占字节。
+  //    ⚠️ 不刷新 created_at：它是会话身份，退款/退还字节都靠它精确匹配。
+  //    若每个并发分片都刷新，先结束的分片会因身份被改而退不掉「未发送字节」，
+  //    空气字节会越积越多，最终把正常续传挤成 410。
+  //    先 SELECT 拿到稳定身份，再带 `created_at = ?` 条件更新；会话若被并发替换，
+  //    UPDATE 自然失败并重试，绝不会把字节记到别的会话上。
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const sess = await env.db
+      .prepare(
+        `SELECT created_at FROM download_sessions
+          WHERE share_id = ?1 AND ip = ?2 AND created_at > ?3
+            AND counted = 1 AND bytes + ?4 <= ?5`
+      )
+      .bind(id, ip, fresh, need, cap)
+      .first<{ created_at: number }>();
+    if (!sess) break;
+    const ext = await env.db
+      .prepare(
+        `UPDATE download_sessions SET bytes = bytes + ?4
+          WHERE share_id = ?1 AND ip = ?2 AND created_at = ?3
+            AND bytes + ?4 <= ?5`
+      )
+      .bind(id, ip, sess.created_at, need, cap)
+      .run();
+    if ((ext.meta.changes ?? 0) > 0)
+      return { isNew: false, admitted: true, claimed: false, sessionAt: sess.created_at };
+  }
 
   // ② 先原子抢名额 —— 只有真正抢到名额的请求才有权重建会话。
   //    ⚠️ 旧实现是「先删掉同 (分享, IP) 的旧会话再插新会话」：一个并发的重复请求
@@ -303,16 +319,25 @@ async function claimSession(
   //    短暂等待后按「续传」原子预占，避免同一批分片被误杀。
   for (let i = 0; i < 5; i++) {
     await new Promise((r) => setTimeout(r, 40));
+    const sess = await env.db
+      .prepare(
+        `SELECT created_at FROM download_sessions
+          WHERE share_id = ?1 AND ip = ?2 AND created_at > ?3
+            AND counted = 1 AND bytes + ?4 <= ?5`
+      )
+      .bind(id, ip, fresh, need, cap)
+      .first<{ created_at: number }>();
+    if (!sess) continue;
     const again = await env.db
       .prepare(
-        `UPDATE download_sessions SET bytes = bytes + ?4, created_at = ?5
-          WHERE share_id = ?1 AND ip = ?2 AND created_at > ?3
-            AND counted = 1 AND bytes + ?4 <= ?6`
+        `UPDATE download_sessions SET bytes = bytes + ?4
+          WHERE share_id = ?1 AND ip = ?2 AND created_at = ?3
+            AND bytes + ?4 <= ?5`
       )
-      .bind(id, ip, fresh, need, now, cap)
+      .bind(id, ip, sess.created_at, need, cap)
       .run();
     if ((again.meta.changes ?? 0) > 0)
-      return { isNew: false, admitted: true, claimed: false, sessionAt: now };
+      return { isNew: false, admitted: true, claimed: false, sessionAt: sess.created_at };
   }
   // 名额已满 / 预算已耗尽 → 拒绝（不占名额）
   return { isNew: false, admitted: false, claimed: false, sessionAt: null };
@@ -787,6 +812,8 @@ export async function handleDownload(
     { zh: "该分享已被管理员撤销。", en: "This share has been revoked." });
   if (row.expires_at && row.expires_at < Date.now()) return errorPage(req, 410, { zh: "链接已过期", en: "Link Expired" },
     { zh: "该分享已超过有效期。", en: "This share has expired." });
+  // 历史脏数据兜底：size=0 的老文件先补回真实大小，再计算 Range / 会话字节预算
+  await resolveFileSize(env, ctx, row);
   // ── 判断本次请求是否"开启一次新下载" ────────────────────────────────
   //  · HEAD：纯元数据探测（浏览器预检 / 下载器探测 / 链接预览），不计次、不扣名额、不计流量；
   //  · 单字节探测 Range（如 bytes=0-0）：下载器/浏览器用它探测是否支持断点续传，
@@ -799,7 +826,7 @@ export async function handleDownload(
   // 门禁拦截时退还刚预占的名额 —— 否则"未真正把文件发出去"的失败请求会白吃一个名额，
   // 分享会被无效请求慢慢锁死（410）。
   const refundIfClaimed = async (): Promise<void> => {
-    if (slot.claimed) await refundSlot(env, "shares", token, ip);
+    if (slot.claimed) await refundSlot(env, "shares", token, ip, slot.sessionAt);
   };
   const block = async (resp: Response): Promise<Response> => {
     await refundIfClaimed();
@@ -894,7 +921,7 @@ export async function handleDownload(
 
   // ── 名额已在 claimSession 阶段原子预占 —— streamFile 只负责"没真正发出去时退还"，
   //    存储读失败 / 对象已被删除时退还名额，避免分享被无效请求慢慢锁死（410）。
-  return streamFile(req, env, ctx, row, token, "share", consumesSlot, refundIfClaimed);
+  return streamFile(req, env, ctx, row, token, "share", consumesSlot, slot.sessionAt, refundIfClaimed);
 }
 
 /**
@@ -943,13 +970,15 @@ export async function handleDirectDownload(
     { zh: "该直链已被撤销。", en: "Direct link revoked." });
   if (row.expires_at && row.expires_at < Date.now()) return errorPage(req, 410, { zh: "直链已过期", en: "Link Expired" },
     { zh: "该直链已超过有效期。", en: "Direct link expired." });
+  // 历史脏数据兜底（同 handleDownload）
+  await resolveFileSize(env, ctx, row);
   // ── 同 handleDownload：HEAD / 单字节探测 / 同一会话内的分片与续传不占名额，
   //    只有"开启新下载会话"的那一次计次（详见 handleDownload 与 evaluateDownloadSlot 注释）
   const slot = await evaluateDownloadSlot(env, req, token, ip, row.size, row.max_downloads, "direct");
   const consumesSlot = slot.consumesSlot;
   // 门禁拦截时退还刚预占的名额（同 handleDownload）。
   const refundIfClaimed = async (): Promise<void> => {
-    if (slot.claimed) await refundSlot(env, "direct_links", token, ip);
+    if (slot.claimed) await refundSlot(env, "direct_links", token, ip, slot.sessionAt);
   };
   const block = async (resp: Response): Promise<Response> => {
     await refundIfClaimed();
@@ -1003,7 +1032,7 @@ export async function handleDirectDownload(
   }
 
   // ── 名额已在 claimSession 阶段原子预占 —— streamFile 只负责"没真正发出去时退还"
-  return streamFile(req, env, ctx, row, token, "direct", consumesSlot, refundIfClaimed);
+  return streamFile(req, env, ctx, row, token, "direct", consumesSlot, slot.sessionAt, refundIfClaimed);
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1028,6 +1057,8 @@ async function streamFile(
   token: string,
   kind: "share" | "direct",
   countAsDownload: boolean,
+  /** 本次请求所属会话的创建时间（退款/退还字节时精确匹配，避免记到别的会话上） */
+  sessionAt: number | null,
   /** 存储读失败 / 对象已被删除时调用：退还预占的下载名额（HEAD 等未占名额的请求内部会自行短路） */
   onAbort?: () => Promise<void>
 ): Promise<Response> {
@@ -1067,6 +1098,19 @@ async function streamFile(
       }
     }
     range = parseRange(req.headers.get("range"), totalSize);
+    // Range 起点越过末尾 / 非法后缀 → 必须 416，绝不能回 200 + 整份文件
+    // （否则断点续传的下载器会把整份文件追加到已下内容后面，得到损坏的超大文件）
+    if (isUnsatisfiableRange(req.headers.get("range"), totalSize)) {
+      await onAbort?.();
+      return new Response(null, {
+        status: 416,
+        headers: {
+          "content-range": `bytes */${totalSize}`,
+          "accept-ranges": "bytes",
+          "cache-control": "no-store",
+        },
+      });
+    }
     if (isHead) {
       const meta = await st.head(row.key);
       if (!meta) {
@@ -1117,8 +1161,8 @@ async function streamFile(
   if (!isHead && body) {
     const reserved = servedLen;
     body = trackSentBytes(body, (sent, complete) => {
-      if (!complete && sent < reserved) {
-        ctx.waitUntil(releaseSessionBytes(env, token, ip, reserved - sent));
+      if (!complete && sent < reserved && sessionAt !== null) {
+        ctx.waitUntil(releaseSessionBytes(env, token, ip, reserved - sent, sessionAt));
       }
     });
   }

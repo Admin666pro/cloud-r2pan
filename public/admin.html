@@ -363,8 +363,14 @@ body {
     padding: 10px;
   }
   .sb-main { padding: 7px 12px; font-size: 13px; }
-  .sb-main .chev { display: none; }
-  .sb-sub { display: none; }
+  .sb-main .chev { display: inline-block; font-size: 9px; }
+  /* 窄屏下分组子菜单必须在点击后可见，否则无法进入文件/分享等页面 */
+  .sb-sub {
+    display: none; flex: 1 0 100%; flex-direction: row; flex-wrap: wrap;
+    gap: 6px; padding-left: 0; max-height: none;
+  }
+  .sb-sub.open { display: flex; }
+  .sb-sub button { width: auto; padding: 6px 12px; }
 }
 
 /* ── 统计卡片 ─────────────────────────── */
@@ -617,8 +623,13 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .actions-cell { display: flex; gap: 6px; }
+/* 窄屏行操作入口：桌面隐藏，≤720px 显示 */
+.fs-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fs-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-more { display: none; flex: 0 0 auto; }
 @media (max-width: 720px) {
   .tbl th:nth-child(n+5), .tbl td:nth-child(n+5) { display: none; }
+  .fs-more { display: inline-flex; padding: 4px 9px; font-size: 15px; line-height: 1.1; }
   .topbar .sub { display: none; }
 }
 </style>
@@ -2386,7 +2397,8 @@ async function loadFiles(dir, q){
   const dirRows = dirs.map(d => `
     <tr>
       <td><input type="checkbox" data-sel="${esc(d.path)}" ${_fsSel.has(d.path) ? 'checked' : ''}></td>
-      <td colspan="2"><span style="margin-right:8px">📁</span><a href="javascript:void(0)" data-open="${esc(d.path)}" style="cursor:pointer;font-weight:600">${esc(d.name)}</a></td>
+      <td colspan="2"><div class="fs-name-row"><span>📁</span><a href="javascript:void(0)" data-open="${esc(d.path)}" class="fs-nm" style="cursor:pointer;font-weight:600">${esc(d.name)}</a>
+        <button class="btn sm fs-more" data-menu="${esc(d.path)}" data-name="${esc(d.name)}" data-dir="1" title="${esc(t('colActions'))}">⋯</button></div></td>
       <td class="num">—</td>
       <td class="num">—</td>
       <td class="num">—</td>
@@ -2402,7 +2414,8 @@ async function loadFiles(dir, q){
     <tr>
       <td><input type="checkbox" data-sel="${esc(f.path)}" ${_fsSel.has(f.path) ? 'checked' : ''}></td>
       <td>${ficon(f.name)}</td>
-      <td class="name-cell" title="${esc(f.path)}">${esc(f.name)}</td>
+      <td class="name-cell" title="${esc(f.path)}"><div class="fs-name-row"><span class="fs-nm">${esc(f.name)}</span>
+        <button class="btn sm fs-more" data-menu="${esc(f.path)}" data-name="${esc(f.name)}" data-id="${f.id}" title="${esc(t('colActions'))}">⋯</button></div></td>
       <td class="num">${fmtSize(f.size)}</td>
       <td class="num">${f.share_count}</td>
       <td class="num">${f.download_count}</td>
@@ -2485,18 +2498,8 @@ async function loadFiles(dir, q){
   $$('[data-share]').forEach(b => b.onclick = () => openShareModal(b.dataset.share));
   $$('[data-direct]').forEach(b => b.onclick = () => openDirectModal(b.dataset.direct));
   $$('[data-rename]').forEach(b => b.onclick = () => openFsMoveModal(b.dataset.rename, b.dataset.dir === '1', b.dataset.name));
-  $$('[data-delpath]').forEach(b => b.onclick = async () => {
-    const isDir = b.dataset.dir === '1';
-    const ok = await confirmDialog(t('deleteFileT'), isDir
-      ? t('fsDeleteDirD', { name: b.dataset.name })
-      : t('deleteFileD', { name: b.dataset.name }));
-    if(!ok) return;
-    try{
-      await api('/api/admin/fs/delete', { method:'POST', body: JSON.stringify({ paths: [b.dataset.delpath] }) });
-      toast(t('fileDeleted'));
-      loadFiles();
-    }catch(e){ toast(e.message, 'err'); }
-  });
+  $$('[data-delpath]').forEach(b => b.onclick = () => fsDeletePath(b.dataset.delpath, b.dataset.dir === '1', b.dataset.name));
+  $$('[data-menu]').forEach(b => b.onclick = () => openFsRowMenu(b.dataset.menu, b.dataset.dir === '1', b.dataset.name, b.dataset.id));
 
   // ── 上传（拖拽 / 点击）──
   const dz = $('#dropzone'), fi = $('#file-input');
@@ -2507,6 +2510,44 @@ async function loadFiles(dir, q){
     dz.ondrop = e => { e.preventDefault(); dz.classList.remove('over'); uploadFiles([...e.dataTransfer.files]); };
     fi.onchange = () => { uploadFiles([...fi.files]); fi.value = ''; };
   }
+}
+
+/** 窄屏行操作菜单（⋯） */
+function openFsRowMenu(path, isDir, name, id){
+  const btn = (m, label, cls = '') => `<button class="btn ${cls}" data-m="${m}">${esc(label)}</button>`;
+  openModal(`
+    <h3>${esc(name)}</h3>
+    <div class="sub" style="word-break:break-all">${esc(path)}</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${isDir ? btn('open', t('fsOpen')) : btn('share', t('createShare'), 'primary')}
+      ${isDir ? '' : btn('direct', t('createDirect'))}
+      ${btn('rename', t('fsRename'))}
+      ${btn('del', t('del'), 'danger')}
+    </div>
+    <div class="actions"><button class="btn" data-x>${esc(t('cancel'))}</button></div>`);
+  $('[data-x]').onclick = closeModal;
+  $$('[data-m]').forEach(b => b.onclick = () => {
+    const m = b.dataset.m;
+    closeModal();
+    if(m === 'open') loadFiles(path, '');
+    else if(m === 'share') openShareModal(id);
+    else if(m === 'direct') openDirectModal(id);
+    else if(m === 'rename') openFsMoveModal(path, isDir, name);
+    else if(m === 'del') fsDeletePath(path, isDir, name);
+  });
+}
+
+/** 删除单个文件或目录（行内按钮与窄屏菜单共用） */
+async function fsDeletePath(path, isDir, name){
+  const ok = await confirmDialog(t('deleteFileT'), isDir
+    ? t('fsDeleteDirD', { name })
+    : t('deleteFileD', { name }));
+  if(!ok) return;
+  try{
+    await api('/api/admin/fs/delete', { method:'POST', body: JSON.stringify({ paths: [path] }) });
+    toast(t('fileDeleted'));
+    loadFiles();
+  }catch(e){ toast(e.message, 'err'); }
 }
 
 /** 新建文件夹弹窗 */
