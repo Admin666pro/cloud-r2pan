@@ -223,6 +223,7 @@ async function fsDeletePath(env: Env, target: string): Promise<boolean> {
   if (file) {
     await env.db.batch([
       env.db.prepare("DELETE FROM shares WHERE file_id = ?1").bind(file.id),
+      env.db.prepare("DELETE FROM direct_links WHERE file_id = ?1").bind(file.id),
       env.db.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(file.id),
       env.db.prepare("DELETE FROM files WHERE id = ?1").bind(file.id),
     ]);
@@ -243,6 +244,7 @@ async function fsDeletePath(env: Env, target: string): Promise<boolean> {
   const keys: string[] = [];
   for (const f of files ?? []) {
     stmts.push(env.db.prepare("DELETE FROM shares WHERE file_id = ?1").bind(f.id));
+    stmts.push(env.db.prepare("DELETE FROM direct_links WHERE file_id = ?1").bind(f.id));
     stmts.push(env.db.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(f.id));
     stmts.push(env.db.prepare("DELETE FROM files WHERE id = ?1").bind(f.id));
     keys.push(f.key);
@@ -765,6 +767,7 @@ export async function handleAdminApi(
     if (existing) {
       await env.db.batch([
         env.db.prepare("DELETE FROM shares WHERE file_id = ?1").bind(existing.id),
+        env.db.prepare("DELETE FROM direct_links WHERE file_id = ?1").bind(existing.id),
         env.db.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(existing.id),
         env.db.prepare("DELETE FROM files WHERE id = ?1").bind(existing.id),
       ]);
@@ -886,6 +889,7 @@ export async function handleAdminApi(
     if (!file) return json({ error: msg(req, "文件不存在", "File not found") }, 404);
     await env.db.batch([
       env.db.prepare("DELETE FROM shares WHERE file_id = ?1").bind(fileId),
+      env.db.prepare("DELETE FROM direct_links WHERE file_id = ?1").bind(fileId),
       env.db.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(fileId),
       env.db.prepare("DELETE FROM files WHERE id = ?1").bind(fileId),
     ]);
@@ -1000,57 +1004,18 @@ export async function handleAdminApi(
     return json({ shares });
   }
 
-  // ── 清理失效分享（过期 / 已撤销 / 达上限） + 孤儿 files + 孤儿 R2 对象 ──
+  // ── 清理失效分享（过期 / 已撤销 / 达上限） ──
+  // ⚠️ 只删分享链接，**绝不删文件**：文件管理是独立功能，一个文件可能还没有创建分享，
+  //    也可能只被直链引用。旧实现把"没有 share 引用的文件"当孤儿一并删除（含存储对象），
+  //    点一次清理就会把刚上传、尚未分享的文件以及仅直链使用的文件全部删掉。
   if (path === "/api/admin/shares/cleanup" && method === "POST") {
     const now = Date.now();
-    // 1. 删除失效 shares
     const deleted = await env.db.prepare(
       "DELETE FROM shares WHERE revoked = 1 OR (expires_at IS NOT NULL AND expires_at < ?1) OR (max_downloads IS NOT NULL AND download_count >= max_downloads)"
     )
       .bind(now)
       .run();
-
-    // 2. 查出孤儿 files：没有任何 share 引用的文件（LEFT JOIN 反查）
-    const orphans = await env.db.prepare(
-      `SELECT f.id, f.key FROM files f
-       LEFT JOIN shares s ON s.file_id = f.id
-       WHERE s.id IS NULL`
-    ).all<{ id: string; key: string }>();
-
-    const orphanIds = (orphans.results ?? []).map((o) => o.id);
-    const orphanKeys = (orphans.results ?? []).map((o) => o.key);
-
-    // 3. 删除孤儿 files 的 DB 记录 + 关联 download_logs
-    if (orphanIds.length > 0) {
-      // D1 支持 IN (...) 参数绑定
-      const placeholders = orphanIds.map((_, i) => `?${i + 1}`).join(", ");
-      await env.db.batch([
-        env.db.prepare(`DELETE FROM download_logs WHERE file_id IN (${placeholders})`).bind(...orphanIds),
-        env.db.prepare(`DELETE FROM files WHERE id IN (${placeholders})`).bind(...orphanIds),
-      ]);
-    }
-
-    // 4. 异步清理孤儿存储对象（不阻塞响应，批量删除可能慢）
-    if (orphanKeys.length > 0) {
-      ctx.waitUntil(
-        (async () => {
-          const st = await storage(env);
-          for (const key of orphanKeys) {
-            try {
-              await st.delete(key);
-            } catch {
-              // 删除失败不影响 DB 清理结果，静默跳过
-            }
-          }
-        })()
-      );
-    }
-
-    return json({
-      ok: true,
-      deleted_shares: deleted.meta.changes ?? 0,
-      deleted_orphan_files: orphanIds.length,
-    });
+    return json({ ok: true, deleted_shares: deleted.meta.changes ?? 0 });
   }
 
   // ── 撤销/删除分享 ─────────────────────────────────

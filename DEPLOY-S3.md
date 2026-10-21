@@ -257,7 +257,7 @@ npm run deploy
 5. 选择 **s3**，填写 S3 endpoint / region / bucket / AK / SK
 6. 点 **保存** → 点 **测试连接**（如果用刚填的配置就用 settings 里已存的值）
 7. 成功后，**下次上传的文件会写入 S3，下载也从 S3 读**
-8. 已存在 R2 里的文件仍从 R2 读取（如果 R2 binding 还在）。如果完全移除 R2 binding，旧文件的 key 还在 D1 里，但 R2 中已无对象 → 下载会报 404。可以用 cleanup API 清理孤儿记录。
+8. 已存在 R2 里的文件仍从 R2 读取（如果 R2 binding 还在）。如果完全移除 R2 binding，旧文件的 key 还在 D1 里，但 R2 中已无对象 → 下载会报 404。可在「文件」Tab 删除这些旧文件记录（会一并清理 D1 记录与存储对象）。
 
 ### 迁移 R2 数据到 S3
 
@@ -295,7 +295,7 @@ npm run deploy
 | `/api/admin/settings` | PUT | 更新 `storage_provider`、`s3_*` 系列字段 |
 | `/api/admin/files/upload` | POST | 上传（自动路由到当前选择的存储后端） |
 | `/api/admin/files/:id` | DELETE | 删除（D1 记录 + 存储对象级联删除） |
-| `/api/admin/shares/cleanup` | POST | 清理失效分享 + 孤儿存储对象 |
+| `/api/admin/shares/cleanup` | POST | 清理失效分享（只删链接，不删文件） |
 
 ### 全球分布相关 API
 
@@ -348,7 +348,7 @@ npm run dev
 | 现象 | 可能原因 | 解决方案 |
 |---|---|---|
 | 上传报 500 "Storage write failed" | S3 endpoint/region/bucket 配置错误；或网络不通 | 管理后台 → 设置 → 测试连接 |
-| 下载报 404 文件不存在 | 存储里没这个对象（迁移遗漏或被清理） | 用 `/api/admin/shares/cleanup` 清理孤儿 |
+| 下载报 404 文件不存在 | 存储里没这个对象（迁移遗漏或被删除） | 在「文件」Tab 删除失效的文件记录，再重新上传 |
 | 下载报 502 "Storage Error" | S3 临时不可达 / 网络抖动 | 等待或切换回 R2 |
 | 全球分布 Tab 空数据 | Analytics Engine 还没写入 | 部署后多下载几次，数据写入有延迟（分钟级） |
 | Analytics Engine SQL 查不到数据 | dataset 名字拼错；或 `analytics_engine_datasets` 没配 | 检查 `wrangler.jsonc`，首次部署后自动创建 |

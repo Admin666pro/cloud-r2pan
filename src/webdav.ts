@@ -610,6 +610,7 @@ async function handleWebDavPut(
     try {
       await env.db.batch([
         env.db.prepare("DELETE FROM shares WHERE file_id = ?1").bind(existing.id),
+        env.db.prepare("DELETE FROM direct_links WHERE file_id = ?1").bind(existing.id),
         env.db.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(existing.id),
         env.db.prepare("DELETE FROM files WHERE id = ?1").bind(existing.id),
       ]);
@@ -652,6 +653,7 @@ async function handleWebDavDelete(env: Env, internalPath: string): Promise<Respo
       const st = await storage(env);
       await env.db.batch([
         env.db.prepare("DELETE FROM shares WHERE file_id = ?1").bind(file.id),
+        env.db.prepare("DELETE FROM direct_links WHERE file_id = ?1").bind(file.id),
         env.db.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(file.id),
         env.db.prepare("DELETE FROM files WHERE id = ?1").bind(file.id),
       ]);
@@ -673,14 +675,19 @@ async function handleWebDavDelete(env: Env, internalPath: string): Promise<Respo
     for (const f of files) {
       await env.db.batch([
         env.db.prepare("DELETE FROM shares WHERE file_id = ?1").bind(f.id),
+        env.db.prepare("DELETE FROM direct_links WHERE file_id = ?1").bind(f.id),
         env.db.prepare("DELETE FROM download_logs WHERE file_id = ?1").bind(f.id),
         env.db.prepare("DELETE FROM files WHERE id = ?1").bind(f.id),
       ]);
       await st.delete(f.key).catch(() => {});
     }
 
-    // 删除目录本身（directories 表）
-    await env.db.prepare("DELETE FROM directories WHERE path = ?1").bind(internalPath).run();
+    // 删除目录本身及其后代目录记录（否则空目录行会残留，挂载端仍能看到"幽灵目录"）
+    const escaped = internalPath.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+    await env.db
+      .prepare("DELETE FROM directories WHERE path = ?1 OR path LIKE ?2 ESCAPE '\\'")
+      .bind(internalPath, escaped + "/%")
+      .run();
 
     return new Response("", { status: 204 });
   }

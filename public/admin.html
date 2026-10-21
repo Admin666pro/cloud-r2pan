@@ -2982,7 +2982,7 @@ async function loadShares(){
   $('#cleanup-shares').onclick = async () => {
     if(!(await confirmDialog(t('confirmCleanupT'), t('confirmCleanupD'), false))) return;
     const r = await api('/api/admin/shares/cleanup', { method:'POST' });
-    toast(t('cleanedN', {n: r.deleted}));
+    toast(t('cleanedN', {n: r.deleted_shares ?? 0}));
     loadShares();
   };
   $$('[data-rv]').forEach(b => b.onclick = async () => {
