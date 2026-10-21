@@ -108,8 +108,18 @@ async function ensureDirChain(env: Env, dir: string): Promise<void> {
   }
   if (stmts.length) await env.db.batch(stmts);
 }
+/** 文件排序：time | name | size，方向 asc / desc（默认 time desc） */
+function sortFiles<T extends { name?: string; size?: number; uploaded_at?: number }>(files: T[], sort?: string, order?: string): T[] {
+  const dir = order === "asc" ? 1 : -1;
+  const arr = [...files];
+  if (sort === "name") arr.sort((a, b) => dir * String(a.name ?? "").localeCompare(String(b.name ?? ""), "zh"));
+  else if (sort === "size") arr.sort((a, b) => dir * ((a.size ?? 0) - (b.size ?? 0)));
+  else arr.sort((a, b) => dir * ((a.uploaded_at ?? 0) - (b.uploaded_at ?? 0)));
+  return arr;
+}
+
 /** 列出某目录的直接子目录与直接子文件（与 WebDAV listDirChildren 同源逻辑） */
-async function listDir(env: Env, dir: string): Promise<{ files: any[]; dirs: { path: string; name: string }[] }> {
+async function listDir(env: Env, dir: string, sort?: string, order?: string): Promise<{ files: any[]; dirs: { path: string; name: string; size: number }[] }> {
   const d = normDir(dir);
   const prefix = d === "/" ? "/" : d + "/";
   const { results } = await env.db
@@ -122,6 +132,7 @@ async function listDir(env: Env, dir: string): Promise<{ files: any[]; dirs: { p
     .bind(prefix === "/" ? "/%" : likePrefix(prefix))
     .all<any>();
   const dirSet = new Set<string>();
+  const dirSize = new Map<string, number>();
   const files: any[] = [];
   for (const f of results ?? []) {
     // 兼容历史脏数据：早期 admin 上传把 path 留成了默认值 "/"，这里按 "name" 还原到根目录
@@ -131,7 +142,11 @@ async function listDir(env: Env, dir: string): Promise<{ files: any[]; dirs: { p
     if (!rest) continue;
     const slash = rest.indexOf("/");
     if (slash < 0) files.push({ ...f, path: full });   // 直接子文件
-    else dirSet.add(prefix + rest.slice(0, slash));    // 更深层 → 归属某个子目录
+    else {
+      const sub = prefix + rest.slice(0, slash);       // 更深层 → 归属某个子目录
+      dirSet.add(sub);
+      dirSize.set(sub, (dirSize.get(sub) ?? 0) + (f.size || 0));
+    }
   }
   files.sort((a, b) => (b.uploaded_at ?? 0) - (a.uploaded_at ?? 0));
   // directories 表里显式创建（可能是空目录）的后代
@@ -147,8 +162,8 @@ async function listDir(env: Env, dir: string): Promise<{ files: any[]; dirs: { p
   }
   const dirs = Array.from(dirSet)
     .sort()
-    .map((p) => ({ path: p, name: p.split("/").filter(Boolean).pop() || p }));
-  return { files, dirs };
+    .map((p) => ({ path: p, name: p.split("/").filter(Boolean).pop() || p, size: dirSize.get(p) ?? 0 }));
+  return { files: sortFiles(files, sort, order), dirs };
 }
 
 /** 按全路径查文件（path 即含文件名的全路径） */
@@ -716,9 +731,12 @@ export async function handleAdminApi(
   //   GET /api/admin/files                  → 根目录内容（子目录 + 子文件）
   //   GET /api/admin/files?path=/docs       → 指定目录内容
   //   GET /api/admin/files?q=keyword        → 全盘按文件名搜索
+  //   GET /api/admin/files?sort=time|name|size&order=asc|desc → 排序（默认 time desc）
   if (path === "/api/admin/files" && method === "GET") {
     const u = new URL(req.url);
     const q = (u.searchParams.get("q") ?? "").trim();
+    const sort = u.searchParams.get("sort") ?? undefined;
+    const order = u.searchParams.get("order") === "asc" ? "asc" : "desc";
     if (q) {
       const esc = q.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
       const { results } = await env.db.prepare(
@@ -727,12 +745,34 @@ export async function handleAdminApi(
                 (SELECT COALESCE(SUM(s.download_count), 0) FROM shares s WHERE s.file_id = f.id) AS download_count
          FROM files f WHERE f.name LIKE ?1 ESCAPE '\\' ORDER BY f.uploaded_at DESC LIMIT 200`
       ).bind(`%${esc}%`).all();
-      return json({ files: results ?? [], dirs: [], path: "/", search: q });
+      return json({ files: sortFiles(results ?? [], sort, order), dirs: [], path: "/", search: q });
     }
     const dir = normDir(u.searchParams.get("path"));
     if (!isSafePath(dir)) return json({ error: msg(req, "路径不合法", "Invalid path") }, 400);
-    const { files, dirs } = await listDir(env, dir);
+    const { files, dirs } = await listDir(env, dir, sort, order);
     return json({ files, dirs, path: dir });
+  }
+
+  // ── 管理端下载文件（不占公开下载名额 / 不计流量） ──
+  //   GET /api/admin/files/download?path=/docs/a.txt
+  if (path === "/api/admin/files/download" && method === "GET") {
+    const p = normDir(new URL(req.url).searchParams.get("path"));
+    if (!isSafePath(p) || p === "/") return json({ error: msg(req, "路径不合法", "Invalid path") }, 400);
+    const file = await findFileByPath(env, p);
+    if (!file) return json({ error: msg(req, "文件不存在", "File not found") }, 404);
+    const meta = await env.db
+      .prepare("SELECT name, mime FROM files WHERE id = ?1")
+      .bind(file.id)
+      .first<{ name: string; mime: string }>();
+    const st = await storage(env);
+    const obj = await st.get(file.key).catch(() => null);
+    if (!obj) return json({ error: msg(req, "存储对象不存在", "Storage object missing") }, 404);
+    const headers = new Headers();
+    headers.set("content-type", meta?.mime || obj.contentType || "application/octet-stream");
+    headers.set("content-length", String(obj.size));
+    headers.set("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(meta?.name || p.slice(1))}`);
+    headers.set("cache-control", "no-store");
+    return new Response(obj.body, { headers });
   }
 
   // ── 上传文件（原始流式 body，文件名放 X-File-Name 头，目标目录放 ?path=） ──
@@ -862,6 +902,68 @@ export async function handleAdminApi(
     }
     await fsMoveEntry(env, from, to);
     return json({ ok: true, from, to });
+  }
+
+  // ── 复制文件（创建副本） ──────────────────────────
+  //   POST /api/admin/fs/copy  { from, to }
+  //   · 仅支持文件（目录复制暂不支持）
+  //   · 目标父目录自动创建；目标已存在 → 409（不静默覆盖）
+  if (path === "/api/admin/fs/copy" && method === "POST") {
+    const body = await readJson<{ from?: string; to?: string }>(req);
+    const from = normDir(body.from);
+    const to = normDir(body.to);
+    if (!isSafePath(from) || !isSafePath(to) || from === "/" || to === "/")
+      return json({ error: msg(req, "路径不合法", "Invalid path") }, 400);
+    if (from === to) return json({ error: msg(req, "目标与源相同", "Target equals source") }, 400);
+    const src = await findFileByPath(env, from);
+    if (!src) return json({ error: msg(req, "源不存在", "Source not found") }, 404);
+    const meta = await env.db
+      .prepare("SELECT name, size, mime FROM files WHERE id = ?1")
+      .bind(src.id)
+      .first<{ name: string; size: number; mime: string }>();
+    const parent = dirOfFullPath(to);
+    const anc = await findAncestorFile(env, parent);
+    if (anc) return json({ error: msg(req, `目标父路径「${anc}」已是一个文件`, `Target parent path "${anc}" is a file`) }, 409);
+    await ensureDirChain(env, parent);
+    const toTaken = await pathTaken(env, to, false);
+    if (toTaken)
+      return json({ error: msg(req, "目标路径已存在", "Target path already exists") }, 409);
+    const st = await storage(env);
+    const obj = await st.get(src.key).catch(() => null);
+    if (!obj) return json({ error: msg(req, "存储对象不存在", "Storage object missing") }, 404);
+    const id = randomId(14);
+    const key = `files/${id}`;
+    try {
+      const put = await st.put(key, obj.body, {
+        contentType: meta?.mime || obj.contentType,
+        contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(meta?.name || "file")}`,
+      });
+      // 流式 PUT 拿不到大小时依次回退：源对象 size → HEAD 新对象
+      let size = put.size;
+      if (size <= 0 && obj.size > 0) size = obj.size;
+      if (size <= 0) {
+        const h = await st.head(key).catch(() => null);
+        if (h?.size) size = h.size;
+      }
+      // ⚠️ name 必须取目标路径的 basename（复制时若改了名，沿用源名会导致
+      // 列表显示与 path 不一致、全盘搜索搜不到新名字）
+      const toName = to.split("/").filter(Boolean).pop() || "unnamed";
+      try {
+        await env.db.prepare(
+          "INSERT INTO files(id, key, name, size, mime, path, uploaded_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+        )
+          .bind(id, key, toName, size, meta?.mime || "application/octet-stream", to, Date.now())
+          .run();
+      } catch (dbErr) {
+        ctx.waitUntil(st.delete(key).catch(() => {}));
+        console.error("fs/copy: D1 insert failed, cleaned up storage object:", dbErr);
+        return json({ error: msg(req, "数据库写入失败，请重试", "Database write failed. Please retry.") }, 500);
+      }
+      return json({ ok: true, id, path: to, size }, 201);
+    } catch (err: any) {
+      ctx.waitUntil(st.delete(key).catch(() => {}));
+      return json({ error: msg(req, "存储复制失败", "Storage copy failed"), detail: String(err?.message || err) }, 500);
+    }
   }
 
   // ── 批量删除（文件 / 目录，按全路径；目录递归删除） ──
