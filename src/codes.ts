@@ -169,22 +169,26 @@ export async function deductQuota(
   if (fresh.status === "revoked") return { ok: false, remaining: 0, exhausted: true, reason: "revoked", message: "该激活码已被作废" };
   if (fresh.expires_at && fresh.expires_at < now) return { ok: false, remaining: 0, exhausted: true, reason: "expired", message: "该激活码已过期" };
 
-  // 流量无限 → 直接加 used_bytes 都行，不做耗尽判断
+  // 流量无限 → 直接累加 used_bytes，不做耗尽判断
   const unlimited = fresh.traffic_bytes === 0;
-  const newUsed = fresh.used_bytes + bytes;
 
   let sql: string;
   let bind: any[];
 
   if (unlimited) {
-    sql = "UPDATE activation_codes SET used_bytes = ?1 WHERE id = ?2";
-    bind = [newUsed, fresh.id];
+    // ⚠️ 必须用 `used_bytes = used_bytes + ?` 原子累加，不能先读后写 `SET used_bytes = 新值`：
+    //    多线程下载器的并发分片会同时读到同一个旧值，互相覆盖 → 4 个分片只记了 1 份流量。
+    sql = "UPDATE activation_codes SET used_bytes = used_bytes + ?1 WHERE id = ?2 AND status != 'revoked'";
+    bind = [bytes, fresh.id];
   } else {
     // 原子 check-and-update：只有 used + bytes <= total 才更新，防止并发超扣
     // 额度耗尽时自动把 status 切为 'exhausted'，让后台统计/过滤能正确识别
     sql =
-      "UPDATE activation_codes SET used_bytes = ?1, status = CASE WHEN ?1 >= traffic_bytes THEN 'exhausted' ELSE status END WHERE id = ?2 AND used_bytes + ?3 <= traffic_bytes AND status != 'revoked'";
-    bind = [newUsed, fresh.id, bytes];
+      `UPDATE activation_codes
+          SET used_bytes = used_bytes + ?1,
+              status = CASE WHEN used_bytes + ?1 >= traffic_bytes THEN 'exhausted' ELSE status END
+        WHERE id = ?2 AND used_bytes + ?1 <= traffic_bytes AND status != 'revoked'`;
+    bind = [bytes, fresh.id];
   }
 
   const result = await env.db.prepare(sql).bind(...bind).run();
@@ -206,9 +210,32 @@ export async function deductQuota(
     return { ok: false, remaining: Math.max(0, again.traffic_bytes - again.used_bytes), exhausted: true, reason: "unknown", message: "扣减失败" };
   }
 
+  const newUsed = fresh.used_bytes + bytes; // 仅用于返回剩余额度的近似值
   const remaining = unlimited ? -1 : Math.max(0, fresh.traffic_bytes - newUsed);
   const exhausted = !unlimited && newUsed >= fresh.traffic_bytes;
   return { ok: true, remaining, exhausted };
+}
+
+/**
+ * 退还预扣的激活码额度（请求未真正把字节发出去时调用）。
+ *
+ * 与下载会话的字节预算同理：额度在响应发出前同步预扣，若存储读失败 / 客户端中途断开，
+ * 必须把「预扣但没发出去」的部分退回，否则用户会为空气流量买单，额度很快被消耗光。
+ */
+export async function refundQuota(env: Env, codeId: string, bytes: number): Promise<void> {
+  if (bytes <= 0) return;
+  await env.db
+    .prepare(
+      `UPDATE activation_codes
+          SET used_bytes = MAX(0, used_bytes - ?1),
+              status = CASE WHEN status = 'exhausted'
+                             AND MAX(0, used_bytes - ?1) < traffic_bytes THEN 'active'
+                            ELSE status END
+        WHERE id = ?2 AND used_bytes > 0`
+    )
+    .bind(bytes, codeId)
+    .run()
+    .catch(() => {});
 }
 
 /** 激活：首次使用时把码置为 active 并计算 expires_at */

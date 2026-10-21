@@ -2,7 +2,7 @@ import type { Env, ShareWithFile, DirectLinkWithFile } from "./types";
 import { getSettings, addTraffic, consumePreviewQuota } from "./settings";
 import { parseUA } from "./ua";
 import { clientIp, isAdminWhitelisted } from "./auth";
-import { findCodeByString, checkCodeUsable, activateCodeIfNeeded, deductQuota, formatCodeStatus } from "./codes";
+import { findCodeByString, checkCodeUsable, activateCodeIfNeeded, deductQuota, refundQuota, formatCodeStatus, type ActivationCodeRow } from "./codes";
 import { errorPage, json } from "./pages";
 import { hmacHex, sha256Hex, randomHex, safeEqual, decryptSecret } from "./crypto";
 import { verifyOAuthSession } from "./oauth";
@@ -522,6 +522,39 @@ async function resolveFileSize(
   }
 }
 
+/**
+ * 激活码额度「预扣」—— 在响应发出前**同步**把本次要发送的字节记到码上。
+ *
+ * 为什么必须预扣而不能等流结束后再扣：
+ *   · 额度不足一个完整文件的码（例如 1KB 的码下 1MB 文件）在旧的"事后扣减"里会扣减失败，
+ *     但下载已经放行，且码仍被判定为"可用" → 可无限次下载，同时绕过月度流量限额与每 IP 限次，
+ *     等于给了一个永久免费通行证。
+ *   · 并发请求先读后写会互相覆盖（见 deductQuota 注释），实际只记了 1 份流量。
+ *
+ * 返回 `{ row: null }` 表示额度不足以覆盖本次请求 / 扣减失败 → 调用方必须回退普通通道门禁
+ * （月度流量限额、每 IP 限次），绝不能把"半覆盖"的码当作免费通行证。
+ */
+async function prepayCodeQuota(
+  env: Env,
+  req: Request,
+  size: number,
+  codeRow: ActivationCodeRow | null
+): Promise<{ row: ActivationCodeRow | null; bytes: number }> {
+  if (!codeRow || req.method === "HEAD") return { row: codeRow, bytes: 0 };
+  // 本次请求实际要发送的字节数；越界 Range 会收到 416（不发送内容），不占用额度
+  if (isUnsatisfiableRange(req.headers.get("range"), size)) return { row: codeRow, bytes: 0 };
+  const need = parseRange(req.headers.get("range"), size)?.length ?? size;
+  if (need <= 0) return { row: codeRow, bytes: 0 };
+  // 先激活（写入 activated_at / expires_at），再预扣，避免扣成 exhausted 后无法再激活导致永不过期
+  await activateCodeIfNeeded(env, codeRow).catch(() => {});
+  const dr = await deductQuota(env, codeRow, need);
+  if (!dr.ok) {
+    console.warn(`[code-prepay-decline] code=${codeRow.code} need=${need} reason=${dr.reason} msg=${dr.message}`);
+    return { row: null, bytes: 0 };
+  }
+  return { row: codeRow, bytes: need };
+}
+
 /* ═══════════ 分享密码 & 下载授权令牌 ═══════════
  * 密码存储为加盐 SHA-256（salt:sha256(salt:password)）；下载授权用 HMAC 签名携带过期时间，
  * 避免把明文密码拼进下载 URL。HMAC 密钥复用 admin，无需新增 Secret，密钥轮换时短时令牌即失效。
@@ -794,8 +827,7 @@ export async function handleDownload(
   // 回退到普通通道（照常受全局月度限额 / 每 IP 限次约束）。
   // 这与在线预览(handlePreviewOpen)的处理保持一致；只有可用状态的有效码才抵扣独立额度。
   // 若在此处返回错误页，会导致用户浏览器 localStorage 里残留的失效码把正常下载也一并卡死。
-  const codeRow = foundCode && checkCodeUsable(foundCode as any).ok ? foundCode : null;
-  if (codeRow) activateCodeIfNeeded(env, codeRow).catch(() => {});
+  let codeRow = foundCode && checkCodeUsable(foundCode as any).ok ? foundCode : null;
 
   if (ban) {
     if (ban.expires_at && ban.expires_at < Date.now()) {
@@ -814,6 +846,15 @@ export async function handleDownload(
     { zh: "该分享已超过有效期。", en: "This share has expired." });
   // 历史脏数据兜底：size=0 的老文件先补回真实大小，再计算 Range / 会话字节预算
   await resolveFileSize(env, ctx, row);
+  // 激活码额度同步预扣 —— 额度不足以覆盖本次请求时 codeRow 置空，回退普通通道门禁。
+  // 必须在下面的「月度流量 / 每 IP 限次」判断**之前**完成，否则一个额度不够的码仍会
+  // 被当作免费通行证（不受任何限额约束）。
+  let codePrepaid = 0;
+  {
+    const paid = await prepayCodeQuota(env, req, row.size, codeRow);
+    codeRow = paid.row;
+    codePrepaid = paid.bytes;
+  }
   // ── 判断本次请求是否"开启一次新下载" ────────────────────────────────
   //  · HEAD：纯元数据探测（浏览器预检 / 下载器探测 / 链接预览），不计次、不扣名额、不计流量；
   //  · 单字节探测 Range（如 bytes=0-0）：下载器/浏览器用它探测是否支持断点续传，
@@ -828,8 +869,13 @@ export async function handleDownload(
   const refundIfClaimed = async (): Promise<void> => {
     if (slot.claimed) await refundSlot(env, "shares", token, ip, slot.sessionAt);
   };
+  // 门禁拦截 / 请求失败时，把预扣的激活码额度一并退回（还没发出任何字节）
+  const refundCodePrepaid = async (): Promise<void> => {
+    if (codeRow && codePrepaid > 0) await refundQuota(env, codeRow.id, codePrepaid);
+  };
   const block = async (resp: Response): Promise<Response> => {
     await refundIfClaimed();
+    await refundCodePrepaid();
     return resp;
   };
 
@@ -921,7 +967,7 @@ export async function handleDownload(
 
   // ── 名额已在 claimSession 阶段原子预占 —— streamFile 只负责"没真正发出去时退还"，
   //    存储读失败 / 对象已被删除时退还名额，避免分享被无效请求慢慢锁死（410）。
-  return streamFile(req, env, ctx, row, token, "share", consumesSlot, slot.sessionAt, refundIfClaimed);
+  return streamFile(req, env, ctx, row, token, "share", consumesSlot, slot.sessionAt, codeRow, codePrepaid, refundIfClaimed);
 }
 
 /**
@@ -952,8 +998,7 @@ export async function handleDirectDownload(
   ]);
 
   // 同 handleDownload：失效 / 耗尽的激活码不阻断直链下载，忽略并回退到普通通道。
-  const codeRow = foundCode && checkCodeUsable(foundCode as any).ok ? foundCode : null;
-  if (codeRow) activateCodeIfNeeded(env, codeRow).catch(() => {});
+  let codeRow = foundCode && checkCodeUsable(foundCode as any).ok ? foundCode : null;
 
   if (ban) {
     if (ban.expires_at && ban.expires_at < Date.now()) {
@@ -972,6 +1017,13 @@ export async function handleDirectDownload(
     { zh: "该直链已超过有效期。", en: "Direct link expired." });
   // 历史脏数据兜底（同 handleDownload）
   await resolveFileSize(env, ctx, row);
+  // 激活码额度同步预扣（同 handleDownload；不足则回退普通通道门禁）
+  let codePrepaid = 0;
+  {
+    const paid = await prepayCodeQuota(env, req, row.size, codeRow);
+    codeRow = paid.row;
+    codePrepaid = paid.bytes;
+  }
   // ── 同 handleDownload：HEAD / 单字节探测 / 同一会话内的分片与续传不占名额，
   //    只有"开启新下载会话"的那一次计次（详见 handleDownload 与 evaluateDownloadSlot 注释）
   const slot = await evaluateDownloadSlot(env, req, token, ip, row.size, row.max_downloads, "direct");
@@ -980,8 +1032,13 @@ export async function handleDirectDownload(
   const refundIfClaimed = async (): Promise<void> => {
     if (slot.claimed) await refundSlot(env, "direct_links", token, ip, slot.sessionAt);
   };
+  // 门禁拦截时退还预扣的激活码额度（同 handleDownload）
+  const refundCodePrepaid = async (): Promise<void> => {
+    if (codeRow && codePrepaid > 0) await refundQuota(env, codeRow.id, codePrepaid);
+  };
   const block = async (resp: Response): Promise<Response> => {
     await refundIfClaimed();
+    await refundCodePrepaid();
     return resp;
   };
 
