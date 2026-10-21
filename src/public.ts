@@ -1089,7 +1089,7 @@ export async function handleDirectDownload(
   }
 
   // ── 名额已在 claimSession 阶段原子预占 —— streamFile 只负责"没真正发出去时退还"
-  return streamFile(req, env, ctx, row, token, "direct", consumesSlot, slot.sessionAt, refundIfClaimed);
+  return streamFile(req, env, ctx, row, token, "direct", consumesSlot, slot.sessionAt, codeRow, codePrepaid, refundIfClaimed);
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1116,6 +1116,10 @@ async function streamFile(
   countAsDownload: boolean,
   /** 本次请求所属会话的创建时间（退款/退还字节时精确匹配，避免记到别的会话上） */
   sessionAt: number | null,
+  /** 本次请求使用的激活码（已通过 checkCodeUsable；null = 未使用 / 额度不足回退普通通道） */
+  codeRow: ActivationCodeRow | null,
+  /** 已在响应发出前同步预扣的激活码额度（字节）；HEAD / 416 / 额度不足时为 0 */
+  codePrepaid: number,
   /** 存储读失败 / 对象已被删除时调用：退还预占的下载名额（HEAD 等未占名额的请求内部会自行短路） */
   onAbort?: () => Promise<void>
 ): Promise<Response> {
@@ -1125,10 +1129,11 @@ async function streamFile(
   const settings = await getSettings(env);
   const isHead = req.method === "HEAD";
 
-  const urlCode = new URL(req.url).searchParams.get("code");
-  const headerCode = req.headers.get("x-activation-code");
-  const activationCode = (urlCode || headerCode || "").trim().toUpperCase() || null;
-  const codeRow = activationCode ? await findCodeByString(env, activationCode) : null;
+  // 存储读失败 / 对象不存在 → 退还预占的名额与已预扣的激活码额度（还没发出任何字节）
+  const abortAll = async (): Promise<void> => {
+    await onAbort?.();
+    if (codeRow && codePrepaid > 0) await refundQuota(env, codeRow.id, codePrepaid);
+  };
 
   // HEAD 请求只返回元数据（不读对象内容、不计流量、不写日志），用 head() 走轻量路径。
   let totalSize = row.size;
@@ -1158,7 +1163,7 @@ async function streamFile(
     // Range 起点越过末尾 / 非法后缀 → 必须 416，绝不能回 200 + 整份文件
     // （否则断点续传的下载器会把整份文件追加到已下内容后面，得到损坏的超大文件）
     if (isUnsatisfiableRange(req.headers.get("range"), totalSize)) {
-      await onAbort?.();
+      await abortAll();
       return new Response(null, {
         status: 416,
         headers: {
@@ -1171,7 +1176,7 @@ async function streamFile(
     if (isHead) {
       const meta = await st.head(row.key);
       if (!meta) {
-        await onAbort?.();
+        await abortAll();
         return errorPage(req, 404, { zh: "文件不存在", en: "File Not Found" },
           { zh: "文件可能已被删除。", en: "File may have been deleted." });
       }
@@ -1180,7 +1185,7 @@ async function streamFile(
     } else {
       const obj = await st.get(row.key, range ? { offset: range.offset, length: range.length } : undefined);
       if (!obj) {
-        await onAbort?.();
+        await abortAll();
         return errorPage(req, 404, { zh: "文件不存在", en: "File Not Found" },
           { zh: "文件可能已被删除。", en: "File may have been deleted." });
       }
@@ -1190,7 +1195,7 @@ async function streamFile(
     }
   } catch (err: any) {
     console.error(`[download] storage error (${kind}):`, err);
-    await onAbort?.();
+    await abortAll();
     return errorPage(req, 502, { zh: "存储服务错误", en: "Storage Error" },
       { zh: "无法从存储后端读取文件。", en: "Cannot read file from storage." });
   }
@@ -1218,15 +1223,18 @@ async function streamFile(
   if (!isHead && body) {
     const reserved = servedLen;
     body = trackSentBytes(body, (sent, complete) => {
-      if (!complete && sent < reserved && sessionAt !== null) {
-        ctx.waitUntil(releaseSessionBytes(env, token, ip, reserved - sent, sessionAt));
-      }
+      const unsent = reserved - sent;
+      if (complete || unsent <= 0) return;
+      if (sessionAt !== null) ctx.waitUntil(releaseSessionBytes(env, token, ip, unsent, sessionAt));
+      // 激活码额度同样是"预扣"的：客户端断流时退还「预扣但没发出去」的部分
+      if (codeRow && codePrepaid > 0) ctx.waitUntil(refundQuota(env, codeRow.id, Math.min(unsent, codePrepaid)));
     });
   }
 
   // 后台记账：仅在真正把文件发出去时进行（HEAD 不计流量、不写日志）。
   //   · 流量按实际发送字节累加（续传分片也要计带宽）；
-  //   · 下载记录 / 分析数据点只在「新下载」时写（续传复用同一次下载名额，不重复计数）。
+  //   · 下载记录 / 分析数据点只在「新下载」时写（续传复用同一次下载名额，不重复计数）；
+  //   · 激活码额度已在响应发出前同步预扣，这里不再重复扣减。
   if (!isHead) {
     const bytes = servedLen;
     const codeId = codeRow ? codeRow.code : null;
@@ -1235,12 +1243,6 @@ async function streamFile(
         const { browser, os } = parseUA(ua);
 
         await addTraffic(env, bytes);
-        if (codeRow) {
-          const dr = await deductQuota(env, codeRow, bytes);
-          if (!dr.ok) {
-            console.warn(`[code-decline] code=${codeRow.code} reason=${dr.reason} msg=${dr.message}`);
-          }
-        }
 
         if (!countAsDownload) return;
 
@@ -1493,28 +1495,54 @@ export async function handlePreviewRaw(
   if (row.max_downloads && row.download_count >= row.max_downloads) return json({ error: "maxed" }, { status: 410 });
 
   const codeParam = (url.searchParams.get("code") || req.headers.get("x-activation-code") || "").trim().toUpperCase() || null;
-  const codeRow = codeParam ? await findCodeByString(env, codeParam) : null;
+  let codeRow = codeParam ? await findCodeByString(env, codeParam) : null;
+  // 预览同样要按真实大小计算 Range / 额度（历史脏数据 size=0 时不能把整份文件当成空）
+  await resolveFileSize(env, ctx, row);
+  const range = parseRange(req.headers.get("range"), row.size);
+  // 激活码额度同步预扣：额度不足以覆盖本次预览字节时回退普通通道（受月度流量限额约束），
+  // 否则一个额度不够的码会变成永久免费通行证（同 handleDownload）。
+  let codePrepaid = 0;
+  {
+    // 注意：预览对非法 Range 不做 416，而是回退成整份文件（200），所以这里按实际发送量预扣
+    const need = range ? range.length : row.size;
+    if (codeRow && need > 0) {
+      await activateCodeIfNeeded(env, codeRow).catch(() => {});
+      const dr = await deductQuota(env, codeRow, need);
+      if (dr.ok) codePrepaid = need;
+      else {
+        console.warn(`[preview-code-prepay-decline] code=${codeRow.code} reason=${dr.reason}`);
+        codeRow = null;
+      }
+    }
+  }
+  const refundCode = async (): Promise<void> => {
+    if (codeRow && codePrepaid > 0) await refundQuota(env, codeRow.id, codePrepaid);
+  };
 
   // 月度流量限额：预览同样消耗带宽，超限时必须停止，否则持有有效令牌可持续刷流量
   {
     const settings = await getSettings(env);
     const whitelisted = isAdminWhitelisted(clientIp(req), settings.adminIps);
-    const usingCode = !!codeRow && checkCodeUsable(codeRow as any).ok;
+    const usingCode = !!codeRow;
     if (!whitelisted && !usingCode && settings.trafficLimitBytes > 0 && settings.trafficUsedBytes >= settings.trafficLimitBytes) {
+      await refundCode();
       return json({ error: "traffic_exceeded" }, { status: 503 });
     }
   }
 
-  const range = parseRange(req.headers.get("range"), row.size);
   let obj;
   try {
     const st = await storage(env);
     obj = await st.get(row.key, range ? { offset: range.offset, length: range.length } : undefined);
   } catch (err: any) {
     console.error("[preview] storage error:", err);
+    await refundCode();
     return json({ error: "storage_error" }, { status: 502 });
   }
-  if (!obj) return json({ error: "not_found" }, { status: 404 });
+  if (!obj) {
+    await refundCode();
+    return json({ error: "not_found" }, { status: 404 });
+  }
 
   const headers = new Headers();
   headers.set("content-type", row.mime || obj.contentType || "application/octet-stream");
@@ -1529,18 +1557,18 @@ export async function handlePreviewRaw(
   headers.set("content-length", String(servedLen));
   if (range) headers.set("content-range", `bytes ${range.offset}-${range.offset + servedLen - 1}/${row.size}`);
 
-  // 预览同样消耗带宽 → 计入月度流量（若带了有效激活码则扣激活码额度），但不写 download_logs
-  ctx.waitUntil(
-    (async () => {
-      await addTraffic(env, servedLen);
-      if (codeRow) {
-        const dr = await deductQuota(env, codeRow, servedLen);
-        if (!dr.ok) console.warn(`[preview-code-decline] code=${codeRow.code} reason=${dr.reason}`);
-      }
-    })()
-  );
+  // 预览同样消耗带宽 → 计入月度流量；激活码额度已在响应发出前同步预扣。
+  // 客户端中途断开时，把「预扣但没发出去」的额度退回（否则额度会被空气流量吃掉）。
+  ctx.waitUntil(addTraffic(env, servedLen));
+  let stream = obj.body;
+  if (codeRow && codePrepaid > 0) {
+    stream = trackSentBytes(obj.body, (sent, complete) => {
+      const unsent = codePrepaid - sent;
+      if (!complete && unsent > 0) ctx.waitUntil(refundQuota(env, codeRow!.id, unsent));
+    });
+  }
 
-  return new Response(obj.body, { status: range ? 206 : 200, headers });
+  return new Response(stream, { status: range ? 206 : 200, headers });
 }
 
 /** GET /s/:token/preview/zip —— 返回 ZIP 内部文件结构 */
