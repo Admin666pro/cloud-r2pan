@@ -52,6 +52,62 @@ function sanitizeName(name: string): string {
   return cleaned || "unnamed";
 }
 
+/* ═══════ 大文件分片上传常量（Workers 平台单请求体硬上限 100MB，超过必须分片） ═══════ */
+/** 分片 key 白名单：只允许 files/<randomId> 形式（randomId 字符集），防止越权写任意存储对象 */
+const UPLOAD_KEY_RE = /^files\/[abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6,32}$/;
+/** uploadId 白名单：R2/S3 的 uploadId 是 URL 安全的不透明串，只放行安全字符 */
+const UPLOAD_ID_RE = /^[A-Za-z0-9+/_=-]{8,512}$/;
+/** etag 白名单（去引号后的 hex/base64 形式） */
+const UPLOAD_ETAG_RE = /^[A-Za-z0-9+/_=-]{8,128}$/;
+/** 单分片请求体上限（对齐平台 100MB 限制） */
+const MAX_PART_BYTES = 100 * 1024 * 1024;
+/** 建议分片大小 25MB —— 远低于平台限制，慢网下单片失败的重传成本也低 */
+const UPLOAD_PART_SIZE = 25 * 1024 * 1024;
+/** partNumber 合法范围（S3/R2 协议上限 10000 片） */
+const MAX_PART_NUMBER = 10000;
+
+/** 校验并清洗分片会话参数；非法时返回 null */
+function parseUploadSession(key: string, uploadId: string): { key: string; uploadId: string } | null {
+  if (!UPLOAD_KEY_RE.test(key) || !UPLOAD_ID_RE.test(uploadId)) return null;
+  return { key, uploadId };
+}
+
+/* ═══════ 孤儿分片兜底：会话登记 + 惰性过期清扫 ═══════
+ * 分片会话状态由客户端携带，浏览器断网/关页时 complete/abort 都不会执行，
+ * 存储端会残留不完整分片（持续占用存储计费）。
+ * 对策：init 时把会话登记进 D1（upload_sessions），complete/abort 时注销；
+ * 超过 TTL 仍未注销的会话由清扫 abort 并删除登记行。
+ */
+/** 分片上传会话 TTL：超过此时长未 complete/abort 的会话视为孤儿 */
+const UPLOAD_SESSION_TTL_MS = 24 * 3600 * 1000;
+/** 惰性清扫最小间隔（同 isolate 内限流；跨 isolate 可能略频繁，但清扫本身幂等且轻量） */
+const UPLOAD_SWEEP_INTERVAL_MS = 3600 * 1000;
+/** 单次清扫最多处理的过期会话数（限制延迟） */
+const UPLOAD_SWEEP_BATCH = 25;
+let _lastUploadSweepAt = 0;
+
+/** 清扫过期的分片上传会话（尽力清理：abort 失败也删登记行，避免无限重扫） */
+async function sweepExpiredUploadSessions(env: Env, st: StorageProvider): Promise<void> {
+  try {
+    const cutoff = Date.now() - UPLOAD_SESSION_TTL_MS;
+    const { results } = await env.db.prepare(
+      "SELECT key, upload_id FROM upload_sessions WHERE created_at < ?1 LIMIT " + UPLOAD_SWEEP_BATCH
+    ).bind(cutoff).all<{ key: string; upload_id: string }>();
+    for (const row of results ?? []) {
+      try {
+        await st.abortMultipart?.(row.key, row.upload_id);
+      } catch {
+        /* 会话可能已不存在 / 管理员中途切换了存储后端 —— 尽力清理，登记行照删 */
+      }
+      try {
+        await env.db.prepare("DELETE FROM upload_sessions WHERE key = ?1").bind(row.key).run();
+      } catch { /* 下次再扫 */ }
+    }
+  } catch {
+    /* 清扫失败不影响上传主流程 */
+  }
+}
+
 /** 生成带文件名后缀的直链 URL：/d/{token}/{filename}，文件名做 URL 编码 */
 function buildDirectUrl(token: string, fileName?: string | null, downloadName?: string | null): string {
   const displayName = downloadName?.trim() || fileName?.trim();
@@ -307,6 +363,9 @@ export async function handleAdminApi(
       recovery_remaining: s.totpRecoveryHash ? s.totpRecoveryHash.split(",").filter(Boolean).length : 0,
       ui_theme: s.uiTheme,
       admin_tab_config: s.adminTabConfig,
+      // 大文件分片上传（前端文件页据此决定 >100MB 是否可传）
+      big_upload_enabled: s.bigUploadEnabled,
+      storage_provider: s.storageProvider || "r2",
     });
   }
 
@@ -513,6 +572,187 @@ export async function handleAdminApi(
       return json({ error: msg(req, "数据库写入失败，请重试", "Database write failed. Please retry.") }, 500);
     }
     return json({ ok: true, id, name, size: resultSize }, 201);
+  }
+
+  /* ═══════ 大文件分片上传（>100MB）═════════
+   * Workers 平台单请求体硬上限 100MB，超过必须分片：
+   * 浏览器切片 → PUT /part 转发 → 存储端 Multipart 组装。
+   * 会话状态（key/uploadId/parts）由客户端携带，服务端不落库，complete 成功才写 files 表。
+   * 所有接口都在 requireAuth 之后，复用管理员会话鉴权。
+   */
+
+  // ── 分片上传初始化：创建存储端 Multipart 会话 ──
+  if (path === "/api/admin/upload/init" && method === "POST") {
+    const s = await getSettings(env);
+    if (!s.bigUploadEnabled) {
+      return json({ error: msg(req, "大文件上传功能已在设置中关闭", "Large file upload is disabled in Settings") }, 403);
+    }
+    const body = await readJson<{ name?: string; mime?: string; size?: number }>(req);
+    if (!body.name || typeof body.name !== "string") {
+      return json({ error: msg(req, "缺少文件名", "Missing file name") }, 400);
+    }
+    const name = sanitizeName(body.name);
+    const mime = typeof body.mime === "string" && body.mime.trim()
+      ? body.mime.trim().slice(0, 120)
+      : "application/octet-stream";
+    const st = await storage(env);
+    if (!st.supportsMultipart || !st.createMultipart) {
+      return json({ error: msg(req, "当前存储后端不支持大文件分片上传（仅 R2 / S3 支持）", "Current storage backend does not support chunked upload (R2/S3 only)") }, 400);
+    }
+    const id = randomId(14);
+    const key = `files/${id}`;
+    try {
+      const { uploadId } = await st.createMultipart(key, {
+        contentType: mime,
+        contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+      });
+      // 登记会话：供过期清扫兜底清理孤儿分片（浏览器断网/关页时 complete/abort 都不会执行）
+      try {
+        await env.db.prepare(
+          "INSERT INTO upload_sessions(key, upload_id, name, created_at) VALUES(?1, ?2, ?3, ?4)"
+        ).bind(key, uploadId, name, Date.now()).run();
+      } catch (regErr) {
+        // 登记失败 → 立即放弃会话，避免产生无法追踪的孤儿分片（fail-closed）
+        try { await st.abortMultipart?.(key, uploadId); } catch { /* 尽力清理 */ }
+        console.error("chunked upload init: session registration failed, aborted mpu:", regErr);
+        return json({ error: msg(req, "初始化分片上传失败", "Failed to initialize chunked upload") }, 500);
+      }
+      // 惰性触发过期会话清扫（限流 + waitUntil 异步，不阻塞响应）
+      const now = Date.now();
+      if (now - _lastUploadSweepAt >= UPLOAD_SWEEP_INTERVAL_MS) {
+        _lastUploadSweepAt = now;
+        ctx.waitUntil(sweepExpiredUploadSessions(env, st));
+      }
+      return json({ ok: true, key, uploadId, partSize: UPLOAD_PART_SIZE }, 201);
+    } catch (err: any) {
+      return json({ error: msg(req, "初始化分片上传失败", "Failed to initialize chunked upload"), detail: String(err?.message || err) }, 500);
+    }
+  }
+
+  // ── 分片上传：单个分片（partNumber 从 1 开始） ──
+  if (path === "/api/admin/upload/part" && method === "PUT") {
+    const session = parseUploadSession(
+      url.searchParams.get("key") ?? "",
+      url.searchParams.get("uploadId") ?? ""
+    );
+    const partNumber = Number(url.searchParams.get("partNumber"));
+    if (!session || !Number.isInteger(partNumber) || partNumber < 1 || partNumber > MAX_PART_NUMBER) {
+      return json({ error: msg(req, "分片参数非法", "Invalid part parameters") }, 400);
+    }
+    if (!req.body) return json({ error: msg(req, "请求体为空", "Empty request body") }, 400);
+    // 平台 100MB 限制会直接掐断超大请求，这里显式校验 Content-Length 提前给出可读错误
+    const cl = Number(req.headers.get("content-length") ?? "0");
+    if (Number.isFinite(cl) && cl > MAX_PART_BYTES) {
+      return json({ error: msg(req, "单个分片超过 100 MB 限制", "Single part exceeds the 100 MB limit") }, 413);
+    }
+    const st = await storage(env);
+    if (!st.supportsMultipart || !st.uploadPart) {
+      return json({ error: msg(req, "当前存储后端不支持分片上传", "Storage backend does not support chunked upload") }, 400);
+    }
+    try {
+      const { etag } = await st.uploadPart(session.key, session.uploadId, partNumber, req.body);
+      return json({ ok: true, partNumber, etag });
+    } catch (err: any) {
+      return json({ error: msg(req, "分片上传失败", "Part upload failed"), detail: String(err?.message || err) }, 500);
+    }
+  }
+
+  // ── 分片上传：组装 + 落库（与单请求直传的落库逻辑一致） ──
+  if (path === "/api/admin/upload/complete" && method === "POST") {
+    const s = await getSettings(env);
+    if (!s.bigUploadEnabled) {
+      return json({ error: msg(req, "大文件上传功能已在设置中关闭", "Large file upload is disabled in Settings") }, 403);
+    }
+    const body = await readJson<{
+      key?: string; uploadId?: string; name?: string; mime?: string;
+      parts?: { partNumber?: unknown; etag?: unknown }[];
+    }>(req);
+    const session = typeof body.key === "string" && typeof body.uploadId === "string"
+      ? parseUploadSession(body.key, body.uploadId)
+      : null;
+    if (!session) return json({ error: msg(req, "分片参数非法", "Invalid part parameters") }, 400);
+    if (!body.name || typeof body.name !== "string") {
+      return json({ error: msg(req, "缺少文件名", "Missing file name") }, 400);
+    }
+    const name = sanitizeName(body.name);
+    const mime = typeof body.mime === "string" && body.mime.trim()
+      ? body.mime.trim().slice(0, 120)
+      : "application/octet-stream";
+    // parts 校验：非空数组、partNumber 整数升序且不重复、etag 字符合法
+    const rawParts = Array.isArray(body.parts) ? body.parts : [];
+    if (rawParts.length < 1 || rawParts.length > MAX_PART_NUMBER) {
+      return json({ error: msg(req, "分片列表非法", "Invalid parts list") }, 400);
+    }
+    const parts: { partNumber: number; etag: string }[] = [];
+    let prev = 0;
+    for (const p of rawParts) {
+      const n = Number(p?.partNumber);
+      const etag = typeof p?.etag === "string" ? p.etag : "";
+      if (!Number.isInteger(n) || n < 1 || n > MAX_PART_NUMBER || !UPLOAD_ETAG_RE.test(etag)) {
+        return json({ error: msg(req, "分片列表非法", "Invalid parts list") }, 400);
+      }
+      if (n <= prev) {
+        return json({ error: msg(req, "分片顺序非法（必须升序且不重复）", "Invalid part order (must be ascending and unique)") }, 400);
+      }
+      prev = n;
+      parts.push({ partNumber: n, etag });
+    }
+    const st = await storage(env);
+    if (!st.supportsMultipart || !st.completeMultipart) {
+      return json({ error: msg(req, "当前存储后端不支持分片上传", "Storage backend does not support chunked upload") }, 400);
+    }
+    let resultSize = 0;
+    try {
+      const res = await st.completeMultipart(session.key, session.uploadId, parts);
+      resultSize = res.size;
+    } catch (err: any) {
+      // 组装失败：主动放弃会话，防止孤儿分片长期占用存储（客户端会整体重传）
+      const abort = st.abortMultipart?.(session.key, session.uploadId);
+      if (abort) ctx.waitUntil(abort.catch(() => {}));
+      // 同步注销登记行（非关键路径，失败由过期清扫兜底）
+      ctx.waitUntil(env.db.prepare("DELETE FROM upload_sessions WHERE key = ?1").bind(session.key).run().catch(() => {}));
+      return json({ error: msg(req, "分片组装失败", "Failed to complete multipart upload"), detail: String(err?.message || err) }, 500);
+    }
+    // 落库失败时清理已组装的存储对象（与单请求直传的 Bug #4 修复同策略）
+    const id = session.key.slice("files/".length);
+    try {
+      await env.db.prepare(
+        "INSERT INTO files(id, key, name, size, mime, uploaded_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6)"
+      )
+        .bind(id, session.key, name, resultSize, mime, Date.now())
+        .run();
+    } catch (dbErr) {
+      ctx.waitUntil(st.delete(session.key).catch(() => {}));
+      console.error("chunked upload complete: D1 insert failed, cleaned up storage object:", dbErr);
+      return json({ error: msg(req, "数据库写入失败，请重试", "Database write failed. Please retry.") }, 500);
+    }
+    // 注销会话登记（非关键路径：失败时清扫会对已完成的会话 abort 失败后自愈删除）
+    try {
+      await env.db.prepare("DELETE FROM upload_sessions WHERE key = ?1").bind(session.key).run();
+    } catch { /* 清扫兜底 */ }
+    return json({ ok: true, id, name, size: resultSize }, 201);
+  }
+
+  // ── 分片上传：放弃会话（取消 / 失败清理） ──
+  if (path === "/api/admin/upload/abort" && method === "POST") {
+    const body = await readJson<{ key?: string; uploadId?: string }>(req);
+    const session = typeof body.key === "string" && typeof body.uploadId === "string"
+      ? parseUploadSession(body.key, body.uploadId)
+      : null;
+    if (!session) return json({ error: msg(req, "分片参数非法", "Invalid part parameters") }, 400);
+    const st = await storage(env);
+    if (st.abortMultipart) {
+      try {
+        await st.abortMultipart(session.key, session.uploadId);
+      } catch {
+        // 会话可能已不存在 / 已组装，忽略 —— abort 语义是尽力清理
+      }
+    }
+    // 注销会话登记（行不存在也无妨，幂等）
+    try {
+      await env.db.prepare("DELETE FROM upload_sessions WHERE key = ?1").bind(session.key).run();
+    } catch { /* 尽力清理 */ }
+    return json({ ok: true });
   }
 
   // ── 删除文件（连带存储对象、分享、日志） ──────────
@@ -1250,6 +1490,8 @@ export async function handleAdminApi(
       // 存储后端
       storage_provider: s.storageProvider || "r2",
       storage_has_r2: !!env.r2,
+      // 大文件分片上传开关
+      big_upload_enabled: s.bigUploadEnabled,
       s3_endpoint: s.s3Endpoint,
       s3_region: s.s3Region,
       s3_bucket: s.s3Bucket,
@@ -1346,6 +1588,10 @@ export async function handleAdminApi(
       if (sp === "r2" || sp === "s3" || sp === "webdav") {
         patch.storage_provider = sp;
       }
+    }
+    // 大文件分片上传开关
+    if (typeof body.big_upload_enabled === "boolean") {
+      patch.big_upload_enabled = body.big_upload_enabled ? "1" : "0";
     }
     if (typeof body.s3_endpoint === "string") patch.s3_endpoint = body.s3_endpoint.trim();
     if (typeof body.s3_region === "string") patch.s3_region = body.s3_region.trim();
@@ -1943,7 +2189,7 @@ export async function handleAdminApi(
         const prov = createS3Provider(cfg);
         const testKey = `_r2pan-test-${Date.now()}`;
         // 写一个测试对象
-        await prov.put(testKey, new TextEncoder().encode("cloud-r2pan storage test").buffer, {
+        await prov.put(testKey, new TextEncoder().encode("cloud-r2pan storage test").buffer as ArrayBuffer, {
           contentType: "text/plain",
         });
         // 读回验证

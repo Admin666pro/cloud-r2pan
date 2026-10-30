@@ -138,6 +138,13 @@ export interface Settings {
   s3SecretKeyCipher: string | null;
   /** S3 addressing style: "path"（默认）或 "virtual" */
   s3AddressingStyle: "path" | "virtual" | null;
+
+  // ═══════ 大文件分片上传 ═══════
+  /**
+   * 是否允许上传超过 100 MB 的文件（浏览器分片 + 存储 Multipart 组装）。
+   * Workers 平台单请求体硬上限 100 MB，关闭后单文件最大仍可传 100 MB。默认 true。
+   */
+  bigUploadEnabled: boolean;
   // ═══════ 远程 WebDAV 挂载（出站） ═══════
   /** 远程 WebDAV 服务器 URL，如 https://dav.jianguoyun.com/dav/ 或 https://pan.aliyundrive.com/webdav */
   storageWebdavUrl: string | null;
@@ -290,6 +297,8 @@ export const DEFAULT_SETTINGS: Settings = {
   s3AccessKeyId: null,
   s3SecretKeyCipher: null,
   s3AddressingStyle: "path",
+  // 大文件分片上传 —— 默认开启
+  bigUploadEnabled: true,
   // 远程 WebDAV 挂载 —— 默认未配置
   storageWebdavUrl: null,
   storageWebdavUsername: null,
@@ -412,6 +421,8 @@ export async function getSettings(env: Env): Promise<Settings> {
     s3AccessKeyId: map.get("s3_access_key_id") ?? null,
     s3SecretKeyCipher: map.get("s3_secret_key_cipher") ?? null,
     s3AddressingStyle: (map.get("s3_addressing_style") ?? "path") as Settings["s3AddressingStyle"],
+    // 大文件分片上传（默认开启）
+    bigUploadEnabled: map.get("big_upload_enabled") !== "0",
     // 远程 WebDAV 挂载
     storageWebdavUrl: map.get("storage_webdav_url") ?? null,
     storageWebdavUsername: map.get("storage_webdav_username") ?? null,
