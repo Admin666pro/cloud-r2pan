@@ -46,14 +46,50 @@ export interface StorageListResult {
   nextMarker?: string;
 }
 
+/** 分片上传 init 返回的会话标识（后续 part/complete/abort 用 key + uploadId 定位） */
+export interface StorageMultipartInit {
+  uploadId: string;
+}
+
+/** 单个已上传分片（complete 组装时按 partNumber 升序传入） */
+export interface StorageUploadedPart {
+  partNumber: number;
+  etag: string;
+}
+
 export interface StorageProvider {
   kind: "r2" | "s3" | "webdav";
+  /** 是否支持分片上传（Multipart）。WebDAV 不支持 → 大文件（>100MB）无法上传 */
+  readonly supportsMultipart: boolean;
   /** 上传对象（body 可以是 ReadableStream 或 ArrayBuffer） */
   put(
     key: string,
     body: ReadableStream<Uint8Array> | ArrayBuffer | Uint8Array,
     opts: { contentType?: string; contentDisposition?: string }
   ): Promise<StoragePutResult>;
+  /**
+   * 创建分片上传会话。httpMetadata 在 init 时挂上，complete 后自动继承，
+   * 所以 complete 不再重复传元数据。
+   */
+  createMultipart?(
+    key: string,
+    opts: { contentType?: string; contentDisposition?: string }
+  ): Promise<StorageMultipartInit>;
+  /** 上传单个分片（partNumber 从 1 开始；R2/S3 要求除最后一片外每片 ≥5MiB） */
+  uploadPart?(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    body: ReadableStream<Uint8Array> | ArrayBuffer | Uint8Array
+  ): Promise<{ etag: string }>;
+  /** 组装分片为最终对象（parts 必须按 partNumber 升序且不重复） */
+  completeMultipart?(
+    key: string,
+    uploadId: string,
+    parts: StorageUploadedPart[]
+  ): Promise<StoragePutResult>;
+  /** 放弃分片上传会话并清理已上传分片（防止垃圾分片占用存储） */
+  abortMultipart?(key: string, uploadId: string): Promise<void>;
   /** 读取对象（支持 Range） */
   get(key: string, range?: { offset: number; length?: number }): Promise<StorageObject | null>;
   /** 删除对象 */
@@ -71,6 +107,7 @@ export interface StorageProvider {
 export function createR2Provider(r2: R2Bucket): StorageProvider {
   return {
     kind: "r2",
+    supportsMultipart: true,
     async put(key, body, opts) {
       const r2Body = body instanceof Uint8Array ? body.buffer : body;
       const httpMetadata: Record<string, string> = {};
@@ -78,6 +115,31 @@ export function createR2Provider(r2: R2Bucket): StorageProvider {
       if (opts.contentDisposition) httpMetadata.contentDisposition = opts.contentDisposition;
       const obj = await r2.put(key, r2Body as any, { httpMetadata });
       return { size: obj.size, etag: obj.httpEtag };
+    },
+    async createMultipart(key, opts) {
+      const httpMetadata: Record<string, string> = {};
+      if (opts.contentType) httpMetadata.contentType = opts.contentType;
+      if (opts.contentDisposition) httpMetadata.contentDisposition = opts.contentDisposition;
+      const mpu = await r2.createMultipartUpload(key, { httpMetadata });
+      return { uploadId: mpu.uploadId };
+    },
+    async uploadPart(key, uploadId, partNumber, body) {
+      const mpu = r2.resumeMultipartUpload(key, uploadId);
+      const r2Body = body instanceof Uint8Array ? body.buffer : body;
+      const part = await mpu.uploadPart(partNumber, r2Body as any);
+      // etag 统一去引号存储（httpEtag 是带引号的形式），complete 时直接回传
+      const etag = String((part as any).etag ?? (part as any).httpEtag ?? "").replace(/"/g, "");
+      if (!etag) throw new Error("R2 uploadPart: missing etag in response");
+      return { etag };
+    },
+    async completeMultipart(key, uploadId, parts) {
+      const mpu = r2.resumeMultipartUpload(key, uploadId);
+      const obj = await mpu.complete(parts.map((p) => ({ partNumber: p.partNumber, etag: p.etag })));
+      return { size: obj.size, etag: obj.httpEtag };
+    },
+    async abortMultipart(key, uploadId) {
+      const mpu = r2.resumeMultipartUpload(key, uploadId);
+      await mpu.abort();
     },
     async get(key, range) {
       const r2Range = range
@@ -197,7 +259,7 @@ function buildCanonicalRequest(
 async function hmacSha256(key: ArrayBuffer | Uint8Array, data: string): Promise<ArrayBuffer> {
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    key instanceof Uint8Array ? key.buffer : key,
+    key instanceof Uint8Array ? (key.buffer as ArrayBuffer) : key,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
@@ -354,7 +416,7 @@ export function createS3Provider(cfg: S3Config): StorageProvider {
         bodyHash = "UNSIGNED-PAYLOAD";
         fetchBody = opts.body;
       } else if (opts.body instanceof Uint8Array || opts.body instanceof ArrayBuffer) {
-        const buf = opts.body instanceof ArrayBuffer ? opts.body : opts.body.buffer;
+        const buf = opts.body instanceof ArrayBuffer ? opts.body : (opts.body.buffer as ArrayBuffer);
         bodyHash = await sha256Hex(new TextDecoder().decode(buf));
         fetchBody = buf;
       }
@@ -380,6 +442,7 @@ export function createS3Provider(cfg: S3Config): StorageProvider {
 
   return {
     kind: "s3",
+    supportsMultipart: true,
 
     async put(key, body, opts) {
       const headers: Record<string, string> = {};
@@ -395,6 +458,70 @@ export function createS3Provider(cfg: S3Config): StorageProvider {
         : body instanceof ArrayBuffer ? body.byteLength
         : body instanceof ReadableStream ? -1 : 0;
       return { size: size >= 0 ? size : 0, etag: resp.headers.get("etag")?.replace(/"/g, "") || undefined };
+    },
+
+    async createMultipart(key, opts) {
+      // InitiateMultipartUpload：POST /key?uploads（元数据随 init 请求头挂上，complete 自动继承）
+      const headers: Record<string, string> = {};
+      if (opts.contentType) headers["Content-Type"] = opts.contentType;
+      if (opts.contentDisposition) headers["Content-Disposition"] = opts.contentDisposition;
+      const resp = await doFetch("POST", key, { query: new URLSearchParams({ uploads: "" }), headers });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => resp.statusText);
+        throw new Error(`S3 InitiateMultipartUpload failed: ${resp.status} ${text}`);
+      }
+      const xml = await resp.text();
+      const uploadId = xml.match(/<UploadId>([^<]*)<\/UploadId>/)?.[1];
+      if (!uploadId) throw new Error("S3 InitiateMultipartUpload: missing UploadId in response");
+      return { uploadId };
+    },
+
+    async uploadPart(key, uploadId, partNumber, body) {
+      // UploadPart：PUT /key?partNumber=N&uploadId=...
+      const query = new URLSearchParams({ partNumber: String(partNumber), uploadId });
+      const resp = await doFetch("PUT", key, { query, body });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => resp.statusText);
+        throw new Error(`S3 UploadPart failed: ${resp.status} ${text}`);
+      }
+      const etag = resp.headers.get("etag")?.replace(/"/g, "");
+      if (!etag) throw new Error("S3 UploadPart: missing ETag in response");
+      return { etag };
+    },
+
+    async completeMultipart(key, uploadId, parts) {
+      // CompleteMultipartUpload：POST /key?uploadId=...（parts 必须升序）
+      const sorted = [...parts].sort((a, b) => a.partNumber - b.partNumber);
+      const xmlBody =
+        `<?xml version="1.0" encoding="UTF-8"?>` +
+        `<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/">` +
+        sorted.map((p) => `<Part><PartNumber>${p.partNumber}</PartNumber><ETag>&quot;${p.etag}&quot;</ETag></Part>`).join("") +
+        `</CompleteMultipartUpload>`;
+      const query = new URLSearchParams({ uploadId });
+      const resp = await doFetch("POST", key, { query, body: xmlBody });
+      const respText = await resp.text().catch(() => "");
+      // ⚠️ S3 陷阱：Complete 可能返回 HTTP 200 但 body 里带 <Error>（InvalidPart/EntityTooSmall 等），必须检查 body
+      if (!resp.ok || /<Error[\s>]/.test(respText) || /<Code>[^<]*<\/Code>/.test(respText)) {
+        throw new Error(`S3 CompleteMultipartUpload failed: ${resp.status} ${respText.slice(0, 400)}`);
+      }
+      // complete 响应不含对象大小，补一次 HEAD 拿 Content-Length
+      let size = 0;
+      try {
+        const head = await doFetch("HEAD", key, {});
+        if (head.ok) size = parseInt(head.headers.get("Content-Length") || "0", 10) || 0;
+      } catch { /* HEAD 失败不阻塞 complete，size 允许为 0 */ }
+      const etag = respText.match(/<ETag>([^<]*)<\/ETag>/)?.[1]?.replace(/&quot;/g, "").replace(/"/g, "");
+      return { size, etag: etag || undefined };
+    },
+
+    async abortMultipart(key, uploadId) {
+      // AbortMultipartUpload：DELETE /key?uploadId=...（清理已上传分片）
+      const query = new URLSearchParams({ uploadId });
+      const resp = await doFetch("DELETE", key, { query });
+      if (!resp.ok && resp.status !== 404) {
+        const text = await resp.text().catch(() => resp.statusText);
+        throw new Error(`S3 AbortMultipartUpload failed: ${resp.status} ${text}`);
+      }
     },
 
     async get(key, range) {
@@ -630,6 +757,9 @@ export function createWebDAVProvider(cfg: WebDAVConfig): StorageProvider {
 
   return {
     kind: "webdav",
+    // WebDAV 协议没有服务端分片组装能力（无法把多个 PUT 拼成一个对象），
+    // 不支持 Multipart → 大文件（>100MB）无法上传，前端会提示并保持单请求直传。
+    supportsMultipart: false,
 
     async put(key, body, opts) {
       const hdrs: Record<string, string> = {};

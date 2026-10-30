@@ -657,10 +657,14 @@ const I18N = {
     colExpires: '有效期', colStatus: '状态', colReason: '原因', colBannedAt: '封禁时间', colUntil: '到期',
     // 文件
     dropTitle: '拖拽文件到此处，或点击上传',
-    dropDesc: '单文件最大 100 MB（Workers 请求限制）· 直传 R2 对象存储',
+    dropDesc: '单文件最大 100 MB（Workers 请求限制）· 直传对象存储',
+    dropDescBig: '≤100 MB 直传 · 更大文件自动分片上传（可在设置中关闭）',
     allFiles: '全部文件', noFiles: '还没有文件，上传一个试试', createShare: '创建分享', createDirect: '创建直链', del: '删除',
     tooLarge: '「{name}」超过 100 MB 限制', uploadOk: '「{name}」上传成功', uploadFail: '「{name}」上传失败',
     uploadDone: '完成 ✅', uploadFailShort: '失败',
+    uploadAborted: '「{name}」已取消，分片已清理', partRetry: '「{name}」分片 {n} 失败，重试中…',
+    bigUploadOff: '「{name}」超过 100 MB，且大文件上传功能已在设置中关闭',
+    backendNoBig: '「{name}」超过 100 MB：当前存储后端不支持分片上传（仅 R2 / S3 支持）',
     // 分享弹窗
     shareModalTitle: '创建分享链接', shareModalSub: '生成公开下载链接，可设置有效期与下载次数上限',
     validity: '有效期', perm: '永久有效', h1: '1 小时', d1: '1 天', d7: '7 天', d30: '30 天',
@@ -930,6 +934,8 @@ const I18N = {
     // 存储后端（出站）
     storageBackendTitle: '💾 存储后端',
     storageBackendD: '默认使用 Cloudflare R2（零配置）；也可挂载外部 S3 兼容存储或任何支持 WebDAV 的网盘（坚果云 / 阿里云盘 / OneDrive / Nextcloud 等）',
+    bigUploadTitle: '📦 大文件分片上传',
+    bigUploadD: '允许上传超过 100 MB 的文件（浏览器分片 + 存储 Multipart 组装，仅 R2 / S3 支持）。关闭后单文件最大仍可传 100 MB。',
     storageBackendR2: 'Cloudflare R2（默认）',
     storageBackendS3: 'S3 兼容存储',
     storageBackendWebDAV: '远程 WebDAV 网盘',
@@ -1090,10 +1096,14 @@ const I18N = {
     colExpires: 'Expires', colStatus: 'Status', colReason: 'Reason', colBannedAt: 'Banned at', colUntil: 'Until',
     // 文件
     dropTitle: 'Drop files here or click to upload',
-    dropDesc: 'Max 100 MB per file (Workers limit) · Stored directly in R2',
+    dropDesc: 'Max 100 MB per file (Workers limit) · Stored directly in object storage',
+    dropDescBig: '≤100 MB direct upload · Larger files are auto-chunked (can be disabled in Settings)',
     allFiles: 'All Files', noFiles: 'No files yet — upload one to get started', createShare: 'Share', createDirect: 'Direct', del: 'Delete',
     tooLarge: '"{name}" exceeds the 100 MB limit', uploadOk: '"{name}" uploaded', uploadFail: '"{name}" upload failed',
     uploadDone: 'Done ✅', uploadFailShort: 'Failed',
+    uploadAborted: '"{name}" cancelled, parts cleaned up', partRetry: '"{name}" part {n} failed, retrying…',
+    bigUploadOff: '"{name}" exceeds 100 MB and large-file upload is disabled in Settings',
+    backendNoBig: '"{name}" exceeds 100 MB: the current storage backend does not support chunked upload (R2/S3 only)',
     // 分享弹窗
     shareModalTitle: 'Create Share Link', shareModalSub: 'Generate a public download link with optional expiry and download cap',
     validity: 'Validity', perm: 'Forever', h1: '1 hour', d1: '1 day', d7: '7 days', d30: '30 days',
@@ -1362,6 +1372,8 @@ const I18N = {
     // Storage backend (outbound)
     storageBackendTitle: '💾 Storage Backend',
     storageBackendD: 'Cloudflare R2 by default (zero config). Optionally mount an external S3-compatible store or any WebDAV cloud drive (Jianguoyun / Aliyun Drive / OneDrive / Nextcloud…)',
+    bigUploadTitle: '📦 Large-file Chunked Upload',
+    bigUploadD: 'Allow files over 100 MB (browser chunking + storage multipart assembly, R2/S3 only). When off, files are still capped at 100 MB per upload.',
     storageBackendR2: 'Cloudflare R2 (default)',
     storageBackendS3: 'S3-compatible storage',
     storageBackendWebDAV: 'Remote WebDAV cloud',
@@ -2134,6 +2146,9 @@ async function showApp(prefetchedSession){
     // 复用启动时已拿到的 session（避免重复请求）；登录/2FA 成功后无缓存则自行拉取
     const s = prefetchedSession || await api('/api/admin/session');
     siteTitle = s.site_title || siteTitle;
+    // 上传能力：大文件分片开关 + 存储后端类型（文件页据此决定 >100MB 是否可传）
+    UPLOAD_CAPS.bigEnabled = !!s.big_upload_enabled;
+    UPLOAD_CAPS.backend = s.storage_provider || 'r2';
     // 应用后台标签页自定义配置（#sidebar 尚未渲染，此时仅更新内存状态）
     applyTabConfig(normalizeTabConfig(parseStoredTabConfig(s.admin_tab_config)));
     // 隐藏路由：访问 /admin/apple 强制 Apple 玻璃风格（暗色紫蓝渐变）
@@ -2315,7 +2330,7 @@ async function loadFiles(){
     <div class="dropzone" id="dropzone">
       <div class="icon">☁️</div>
       <div class="t">${esc(t('dropTitle'))}</div>
-      <div class="d">${esc(t('dropDesc'))}</div>
+      <div class="d">${esc(chunkSupported() ? t('dropDescBig') : t('dropDesc'))}</div>
       <input type="file" id="file-input" multiple hidden>
     </div>
     <div id="upload-list"></div>
@@ -2359,29 +2374,144 @@ async function loadFiles(){
   });
 }
 
+/* ═══════════ 大文件分片上传 ═══════════
+ * Workers 平台单请求体硬上限 100MB：
+ *   ≤64MB   → 原有单请求直传 /api/admin/upload（不变）
+ *   >64MB   → 浏览器切片逐片 PUT /api/admin/upload/part，存储端 Multipart 组装
+ * 开关在设置页「存储后端」分组；后端为 WebDAV 或开关关闭时 >100MB 拒绝。
+ */
+const UPLOAD_SINGLE_MAX = 64 * 1024 * 1024;   // 超过该阈值走分片
+const UPLOAD_PART_RETRIES = 3;                // 单个分片失败重试次数
+const UPLOAD_CAPS = { bigEnabled: false, backend: 'r2' };  // 登录/保存设置时由后端刷新
+const chunkSupported = () => UPLOAD_CAPS.bigEnabled && UPLOAD_CAPS.backend !== 'webdav';
+
 function uploadFiles(files){
   for(const file of files){
-    if(file.size > 100 * 1024 * 1024){ toast(t('tooLarge', {name: file.name}), 'err'); continue; }
+    if(file.size > 100 * 1024 * 1024 && !chunkSupported()){
+      toast(t(UPLOAD_CAPS.bigEnabled ? 'backendNoBig' : 'bigUploadOff', {name: file.name}), 'err');
+      continue;
+    }
     const item = document.createElement('div');
     item.className = 'upload-item glass';
     item.innerHTML = `${ficon(file.name)}<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(file.name)}</span>
-      <div class="prog"><i></i></div><span class="pct">0%</span>`;
+      <div class="prog"><i></i></div><span class="pct">0%</span>`
+      + (file.size > UPLOAD_SINGLE_MAX && chunkSupported()
+          ? `<button class="btn sm danger" style="padding:2px 10px;font-size:12px;flex:none" title="${esc(t('cancel'))}">✕</button>`
+          : '');
     $('#upload-list').prepend(item);
+    if(file.size > UPLOAD_SINGLE_MAX && chunkSupported()){
+      uploadChunked(file, item, item.querySelector('button'));
+    } else {
+      uploadSingle(file, item);
+    }
+  }
+}
+
+/* ≤64MB：单请求直传（保持原逻辑） */
+function uploadSingle(file, item){
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/admin/upload');
+  xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name));
+  xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+  xhr.upload.onprogress = e => {
+    const pct = Math.round(e.loaded / e.total * 100);
+    item.querySelector('.prog i').style.width = pct + '%';
+    item.querySelector('.pct').textContent = pct + '%';
+  };
+  xhr.onload = () => {
+    if(xhr.status === 201){ item.querySelector('.pct').textContent = t('uploadDone'); toast(t('uploadOk', {name: file.name})); loadFiles(); }
+    else { item.querySelector('.pct').textContent = t('uploadFailShort'); toast(t('uploadFail', {name: file.name}), 'err'); }
+  };
+  xhr.onerror = () => { item.querySelector('.pct').textContent = t('uploadFailShort'); toast(t('uploadFail', {name: file.name}), 'err'); };
+  xhr.send(file);
+}
+
+/* 单个分片 PUT（XHR 以拿到上传进度）；resolve etag */
+function putPart(key, uploadId, partNumber, blob, onprogress, registerXhr){
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/admin/upload');
-    xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name));
-    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-    xhr.upload.onprogress = e => {
-      const pct = Math.round(e.loaded / e.total * 100);
-      item.querySelector('.prog i').style.width = pct + '%';
-      item.querySelector('.pct').textContent = pct + '%';
-    };
+    registerXhr(xhr);
+    xhr.open('PUT', `/api/admin/upload/part?key=${encodeURIComponent(key)}&uploadId=${encodeURIComponent(uploadId)}&partNumber=${partNumber}`);
+    xhr.upload.onprogress = e => { if(e.lengthComputable) onprogress?.(e.loaded); };
     xhr.onload = () => {
-      if(xhr.status === 201){ item.querySelector('.pct').textContent = t('uploadDone'); toast(t('uploadOk', {name: file.name})); loadFiles(); }
-      else { item.querySelector('.pct').textContent = t('uploadFailShort'); toast(t('uploadFail', {name: file.name}), 'err'); }
+      let data = null;
+      try{ data = JSON.parse(xhr.responseText); }catch{}
+      if(xhr.status === 200 && data?.etag) resolve(data.etag);
+      else reject(new Error(data?.error || `HTTP ${xhr.status}`));
     };
-    xhr.onerror = () => { item.querySelector('.pct').textContent = t('uploadFailShort'); toast(t('uploadFail', {name: file.name}), 'err'); };
-    xhr.send(file);
+    xhr.onerror = () => reject(new Error('network error'));
+    xhr.send(blob);
+  });
+}
+
+/* >64MB：分片上传主流程 init → 逐片 PUT（失败重试）→ complete；失败/取消时 abort 清理孤儿分片 */
+async function uploadChunked(file, item, cancelBtn){
+  const setPct = pct => {
+    item.querySelector('.prog i').style.width = Math.min(100, Math.max(0, pct)) + '%';
+    item.querySelector('.pct').textContent = Math.min(100, Math.max(0, Math.round(pct))) + '%';
+  };
+  let aborted = false, activeXhr = null;
+  const session = { key: '', uploadId: '' };
+
+  const cleanupSession = async () => {
+    if(!session.key || !session.uploadId) return;
+    try{ await api('/api/admin/upload/abort', { method:'POST', body: JSON.stringify({key: session.key, uploadId: session.uploadId}) }); }catch{}
+  };
+  if(cancelBtn) cancelBtn.onclick = () => { aborted = true; try{ activeXhr?.abort(); }catch{} };
+
+  try{
+    // ① 初始化：后端创建 Multipart 会话
+    const init = await api('/api/admin/upload/init', {
+      method:'POST',
+      body: JSON.stringify({ name: file.name, mime: file.type || 'application/octet-stream', size: file.size })
+    });
+    if(aborted){ await cleanupSession(); return; }
+    session.key = init.key;
+    session.uploadId = init.uploadId;
+    const partSize = Number(init.partSize) > 0 ? Number(init.partSize) : 25 * 1024 * 1024;
+    const partPct = partSize / file.size * 100;   // 每片占进度条的比例
+    const parts = [];
+    let offset = 0, partNumber = 1;
+    // ② 逐片上传（串行，单片失败退避重试）
+    while(offset < file.size){
+      if(aborted){ await cleanupSession(); item.querySelector('.pct').textContent = t('uploadFailShort'); toast(t('uploadAborted', {name: file.name})); return; }
+      const end = Math.min(offset + partSize, file.size);
+      const blob = file.slice(offset, end);
+      const basePct = offset / file.size * 100;
+      let etag = null;
+      for(let attempt = 0; ; attempt++){
+        try{
+          etag = await putPart(session.key, session.uploadId, partNumber, blob,
+            loaded => setPct(basePct + (loaded / blob.size) * partPct),
+            xhr => { activeXhr = xhr; });
+          break;
+        }catch(err){
+          if(aborted){ await cleanupSession(); return; }
+          if(attempt >= UPLOAD_PART_RETRIES) throw err;
+          toast(t('partRetry', {name: file.name, n: partNumber}));
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));  // 线性退避
+        }
+      }
+      parts.push({ partNumber, etag });
+      offset = end; partNumber++;
+    }
+    // ③ 组装 + 落库
+    if(aborted){ await cleanupSession(); return; }
+    setPct(100);
+    await api('/api/admin/upload/complete', {
+      method:'POST',
+      body: JSON.stringify({ key: session.key, uploadId: session.uploadId, name: file.name, mime: file.type || 'application/octet-stream', parts })
+    });
+    item.querySelector('.pct').textContent = t('uploadDone');
+    toast(t('uploadOk', {name: file.name}));
+    loadFiles();
+  }catch(err){
+    // 失败：放弃会话清理孤儿分片（后端 complete 失败也会自行 abort，这里是取消/网络断连场景）
+    await cleanupSession();
+    if(!aborted){
+      item.querySelector('.pct').textContent = t('uploadFailShort');
+      toast(t('uploadFail', {name: file.name}), 'err');
+    }
   }
 }
 
@@ -4078,6 +4208,9 @@ async function loadSettings(){
     api('/api/admin/2fa/status').catch(() => ({enabled:false, cloudflare_recovery:false, recovery_remaining:0})),
     api('/api/admin/db/status').catch(() => null),
   ]);
+  // 同步上传能力（设置保存后立即生效，无需重新登录）
+  UPLOAD_CAPS.bigEnabled = !!s.big_upload_enabled;
+  UPLOAD_CAPS.backend = s.storage_provider || 'r2';
   $('#view').innerHTML = `
     <div class="glass group">
       <div class="row">
@@ -4279,6 +4412,10 @@ async function loadSettings(){
               ? `<span style="${s.s3_endpoint && s.s3_bucket ? 'color:#6ee7b7' : 'color:#fda293'}">S3: ${esc(s.s3_endpoint||'')} / ${esc(s.s3_bucket||'')||'⚠ '+esc(t('storageBackendNotSet'))}</span>`
               : `<span style="color:#6ee7b7">✓ ${esc(t('storageBackendR2'))}</span>`)}
       </div>
+      <div class="row" style="margin-top:10px">
+        <div class="info"><div class="t">${esc(t('bigUploadTitle'))}</div><div class="d">${esc(t('bigUploadD'))}</div></div>
+        <label class="switch"><input type="checkbox" id="st-bigupload" ${s.big_upload_enabled?'checked':''}><span class="track"><span class="thumb"></span></span></label>
+      </div>
       <div class="row" style="justify-content:flex-end;margin-top:10px;gap:8px">
         <button class="btn sm" id="st-backend-webdav-cfg" style="${(s.storage_provider||'r2')==='webdav' ? '' : 'opacity:.5'}">🔗 ${esc(t('storageBackendConfig'))} WebDAV</button>
       </div>
@@ -4396,6 +4533,7 @@ async function loadSettings(){
       codes_floating_button_enabled: $('#st-codes-float').checked,
       codes_floating_button_position: $('#st-codes-pos').value,
       storage_provider: $('#st-backend').value,
+      big_upload_enabled: $('#st-bigupload').checked,
     };
     await api('/api/admin/settings', { method:'PUT', body: JSON.stringify(body) });
     toast(t('saved'));
