@@ -72,6 +72,42 @@ function parseUploadSession(key: string, uploadId: string): { key: string; uploa
   return { key, uploadId };
 }
 
+/* ═══════ 孤儿分片兜底：会话登记 + 惰性过期清扫 ═══════
+ * 分片会话状态由客户端携带，浏览器断网/关页时 complete/abort 都不会执行，
+ * 存储端会残留不完整分片（持续占用存储计费）。
+ * 对策：init 时把会话登记进 D1（upload_sessions），complete/abort 时注销；
+ * 超过 TTL 仍未注销的会话由清扫 abort 并删除登记行。
+ */
+/** 分片上传会话 TTL：超过此时长未 complete/abort 的会话视为孤儿 */
+const UPLOAD_SESSION_TTL_MS = 24 * 3600 * 1000;
+/** 惰性清扫最小间隔（同 isolate 内限流；跨 isolate 可能略频繁，但清扫本身幂等且轻量） */
+const UPLOAD_SWEEP_INTERVAL_MS = 3600 * 1000;
+/** 单次清扫最多处理的过期会话数（限制延迟） */
+const UPLOAD_SWEEP_BATCH = 25;
+let _lastUploadSweepAt = 0;
+
+/** 清扫过期的分片上传会话（尽力清理：abort 失败也删登记行，避免无限重扫） */
+async function sweepExpiredUploadSessions(env: Env, st: StorageProvider): Promise<void> {
+  try {
+    const cutoff = Date.now() - UPLOAD_SESSION_TTL_MS;
+    const { results } = await env.db.prepare(
+      "SELECT key, upload_id FROM upload_sessions WHERE created_at < ?1 LIMIT " + UPLOAD_SWEEP_BATCH
+    ).bind(cutoff).all<{ key: string; upload_id: string }>();
+    for (const row of results ?? []) {
+      try {
+        await st.abortMultipart?.(row.key, row.upload_id);
+      } catch {
+        /* 会话可能已不存在 / 管理员中途切换了存储后端 —— 尽力清理，登记行照删 */
+      }
+      try {
+        await env.db.prepare("DELETE FROM upload_sessions WHERE key = ?1").bind(row.key).run();
+      } catch { /* 下次再扫 */ }
+    }
+  } catch {
+    /* 清扫失败不影响上传主流程 */
+  }
+}
+
 /** 生成带文件名后缀的直链 URL：/d/{token}/{filename}，文件名做 URL 编码 */
 function buildDirectUrl(token: string, fileName?: string | null, downloadName?: string | null): string {
   const displayName = downloadName?.trim() || fileName?.trim();
@@ -570,6 +606,23 @@ export async function handleAdminApi(
         contentType: mime,
         contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
       });
+      // 登记会话：供过期清扫兜底清理孤儿分片（浏览器断网/关页时 complete/abort 都不会执行）
+      try {
+        await env.db.prepare(
+          "INSERT INTO upload_sessions(key, upload_id, name, created_at) VALUES(?1, ?2, ?3, ?4)"
+        ).bind(key, uploadId, name, Date.now()).run();
+      } catch (regErr) {
+        // 登记失败 → 立即放弃会话，避免产生无法追踪的孤儿分片（fail-closed）
+        try { await st.abortMultipart?.(key, uploadId); } catch { /* 尽力清理 */ }
+        console.error("chunked upload init: session registration failed, aborted mpu:", regErr);
+        return json({ error: msg(req, "初始化分片上传失败", "Failed to initialize chunked upload") }, 500);
+      }
+      // 惰性触发过期会话清扫（限流 + waitUntil 异步，不阻塞响应）
+      const now = Date.now();
+      if (now - _lastUploadSweepAt >= UPLOAD_SWEEP_INTERVAL_MS) {
+        _lastUploadSweepAt = now;
+        ctx.waitUntil(sweepExpiredUploadSessions(env, st));
+      }
       return json({ ok: true, key, uploadId, partSize: UPLOAD_PART_SIZE }, 201);
     } catch (err: any) {
       return json({ error: msg(req, "初始化分片上传失败", "Failed to initialize chunked upload"), detail: String(err?.message || err) }, 500);
@@ -656,6 +709,8 @@ export async function handleAdminApi(
       // 组装失败：主动放弃会话，防止孤儿分片长期占用存储（客户端会整体重传）
       const abort = st.abortMultipart?.(session.key, session.uploadId);
       if (abort) ctx.waitUntil(abort.catch(() => {}));
+      // 同步注销登记行（非关键路径，失败由过期清扫兜底）
+      ctx.waitUntil(env.db.prepare("DELETE FROM upload_sessions WHERE key = ?1").bind(session.key).run().catch(() => {}));
       return json({ error: msg(req, "分片组装失败", "Failed to complete multipart upload"), detail: String(err?.message || err) }, 500);
     }
     // 落库失败时清理已组装的存储对象（与单请求直传的 Bug #4 修复同策略）
@@ -671,6 +726,10 @@ export async function handleAdminApi(
       console.error("chunked upload complete: D1 insert failed, cleaned up storage object:", dbErr);
       return json({ error: msg(req, "数据库写入失败，请重试", "Database write failed. Please retry.") }, 500);
     }
+    // 注销会话登记（非关键路径：失败时清扫会对已完成的会话 abort 失败后自愈删除）
+    try {
+      await env.db.prepare("DELETE FROM upload_sessions WHERE key = ?1").bind(session.key).run();
+    } catch { /* 清扫兜底 */ }
     return json({ ok: true, id, name, size: resultSize }, 201);
   }
 
@@ -689,6 +748,10 @@ export async function handleAdminApi(
         // 会话可能已不存在 / 已组装，忽略 —— abort 语义是尽力清理
       }
     }
+    // 注销会话登记（行不存在也无妨，幂等）
+    try {
+      await env.db.prepare("DELETE FROM upload_sessions WHERE key = ?1").bind(session.key).run();
+    } catch { /* 尽力清理 */ }
     return json({ ok: true });
   }
 

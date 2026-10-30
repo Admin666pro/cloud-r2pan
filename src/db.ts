@@ -99,6 +99,16 @@ const SCHEMA_STATEMENTS: string[] = [
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   )`,
+  // ═══════════ 大文件分片上传会话登记 ═══════════
+  // 分片上传 init 时登记、complete/abort 时注销；超时未注销的会话由惰性清扫
+  // abort 并删除，防止浏览器断网/关页导致存储端残留孤儿分片（持续占用存储计费）。
+  `CREATE TABLE IF NOT EXISTS upload_sessions (
+    key TEXT PRIMARY KEY,
+    upload_id TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_upload_sessions_created ON upload_sessions(created_at)`,
   `CREATE TABLE IF NOT EXISTS traffic_stats (
     day TEXT PRIMARY KEY,
     bytes INTEGER NOT NULL DEFAULT 0,
@@ -190,7 +200,7 @@ export const EXPECTED_TABLES = [
   "files", "shares", "direct_links", "download_logs", "login_logs",
   "turnstile_visits", "banned_ips", "settings", "traffic_stats",
   "oauth_states", "oauth_providers", "activation_plans", "activation_codes",
-  "directories", "error_logs",
+  "directories", "error_logs", "upload_sessions",
 ];
 
 let schemaReady = false;
