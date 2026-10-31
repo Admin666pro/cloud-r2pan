@@ -36,13 +36,17 @@ async function storage(env: Env): Promise<StorageProvider> {
 
 /* ═══════════ 工具函数 ═══════════ */
 
-/** 路径标准化：确保以 / 开头，不以 / 结尾（根目录除外） */
+/** 路径标准化：确保以 / 开头、不以 / 结尾（根目录除外），并消解 . / .. 段（防路径穿越） */
 function normPath(p: string): string {
-  p = decodeURIComponent(p);
+  try { p = decodeURIComponent(p); } catch { /* 编码非法时保留原串，交由段过滤兜底 */ }
   p = p.replace(/\\/g, "/").replace(/\/+/g, "/");
-  if (!p.startsWith("/")) p = "/" + p;
-  if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
-  return p;
+  const segs: string[] = [];
+  for (const seg of p.split("/")) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") { segs.pop(); continue; } // 在根目录再往上时 pop 空数组安全，等效于留在根
+    segs.push(seg);
+  }
+  return "/" + segs.join("/");
 }
 
 /** 从 WebDAV URL 提取内部路径（去掉 /webdav 前缀） */

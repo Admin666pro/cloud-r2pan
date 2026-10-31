@@ -104,11 +104,17 @@ export function rateLimitLogin(ip: string, limit = 8, windowMs = 60_000): boolea
 
 /** 获取客户端真实 IP（Cloudflare 环境下 CF-Connecting-IP 不可伪造） */
 export function clientIp(req: Request): string {
-  return (
-    req.headers.get("cf-connecting-ip") ??
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    "127.0.0.1"
-  );
+  // CF-Connecting-IP 由 Cloudflare 注入，客户端不可伪造，生产环境恒存在，优先采用
+  const cf = req.headers.get("cf-connecting-ip");
+  if (cf) return cf.split(",")[0].trim();
+  // 仅非 CF 部署（自建反代等）才回退 XFF：取最靠近服务端的一跳（末段）——
+  // 前面的段都是客户端可任意伪造的，取首段会让限流形同虚设
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  return "127.0.0.1";
 }
 
 /** IPv4 字符串 → 32 位无符号整数 */
