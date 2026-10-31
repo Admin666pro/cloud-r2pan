@@ -557,6 +557,56 @@ export async function handleAdminApi(
     });
   }
 
+  // ── 统计图表（概览页趋势图 + TOP 榜数据源）──────────
+  if (path === "/api/admin/stats/charts" && method === "GET") {
+    const daysRaw = Number(new URL(req.url).searchParams.get("days") ?? "30");
+    const days = Math.min(90, Math.max(7, Number.isFinite(daysRaw) ? Math.floor(daysRaw) : 30));
+    const sinceMs = Date.now() - days * 86400_000;
+    const [trendRows, shareRows, topFiles, topShares] = await Promise.all([
+      // 每日下载/流量聚合（traffic_stats 已有日粒度）
+      env.db.prepare("SELECT day, bytes, downloads FROM traffic_stats WHERE day >= date('now', ?1) ORDER BY day")
+        .bind(`-${days - 1} days`)
+        .all<{ day: string; bytes: number; downloads: number }>(),
+      // 每日新增分享数
+      env.db.prepare(
+        "SELECT date(created_at/1000, 'unixepoch') AS day, COUNT(*) AS c FROM shares WHERE created_at >= ?1 GROUP BY day"
+      ).bind(sinceMs).all<{ day: string; c: number }>(),
+      // 窗口内下载 TOP10 文件（download_logs 明细聚合）
+      env.db.prepare(
+        `SELECT file_id, MAX(file_name) AS file_name, COUNT(*) AS downloads, SUM(bytes) AS bytes
+         FROM download_logs WHERE created_at >= ?1 GROUP BY file_id ORDER BY downloads DESC LIMIT 10`
+      ).bind(sinceMs).all<{ file_id: string; file_name: string; downloads: number; bytes: number }>(),
+      // 全时段下载 TOP10 分享
+      env.db.prepare(
+        `SELECT s.id AS share_id, s.download_count AS downloads, s.created_at, s.is_market, s.revoked,
+                COALESCE(f.name, s.market_title, '') AS file_name
+         FROM shares s LEFT JOIN files f ON f.id = s.file_id
+         ORDER BY s.download_count DESC, s.created_at DESC LIMIT 10`
+      ).all(),
+    ]);
+
+    // 补齐无数据的天（下载趋势 / 新增分享合并为一行）
+    const trendMap = new Map((trendRows.results ?? []).map((r) => [r.day, r]));
+    const shareDayMap = new Map((shareRows.results ?? []).map((r) => [r.day, r.c]));
+    const daily: { day: string; downloads: number; bytes: number; new_shares: number }[] = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400_000).toISOString().slice(0, 10);
+      const r = trendMap.get(d);
+      daily.push({
+        day: d,
+        downloads: r?.downloads ?? 0,
+        bytes: r?.bytes ?? 0,
+        new_shares: shareDayMap.get(d) ?? 0,
+      });
+    }
+    return json({
+      days,
+      daily,
+      top_files: topFiles.results ?? [],
+      top_shares: topShares.results ?? [],
+    });
+  }
+
   // ── 文件列表 ──────────────────────────────────────
   if (path === "/api/admin/files" && method === "GET") {
     const { results } = await env.db.prepare(

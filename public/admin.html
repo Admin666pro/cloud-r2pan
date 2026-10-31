@@ -647,6 +647,8 @@ const I18N = {
     statDownloads: '累计下载', todayN: '今日 {n} 次', statFiles: '文件总数', storedR2: '存储于 R2 对象存储',
     statShares: '分享链接', sharesFoot: '有效 {a} 个 · 封禁 IP {b} 个',
     chartTitle: '近 14 天下载趋势', recentTitle: '最近下载', viewAll: '查看全部', noLogsYet: '还没有下载记录',
+    trendTitle: '下载 / 流量趋势', range7: '7 天', range30: '30 天', legendDl: '下载次数', legendBytes: '流量',
+    sharesStatTitle: '分享统计', sharesDaily: '每日新增分享', topFiles: '热门文件 TOP10', topShares: '热门分享 TOP10', noTopData: '暂无数据',
     quotaBannerT: '流量已达预设限额，下载服务已自动暂停',
     quotaBannerD: '所有公开下载请求都会被拦截。你可以在「设置」中调高限额，或重置本月流量。',
     times: '次', unlimitedShort: '无限',
@@ -1102,6 +1104,8 @@ const I18N = {
     statDownloads: 'Total Downloads', todayN: '{n} today', statFiles: 'Files', storedR2: 'Stored in R2 object storage',
     statShares: 'Share Links', sharesFoot: '{a} active · {b} banned IPs',
     chartTitle: 'Downloads · Last 14 Days', recentTitle: 'Recent Downloads', viewAll: 'View all', noLogsYet: 'No downloads yet',
+    trendTitle: 'Download / Traffic Trend', range7: '7 days', range30: '30 days', legendDl: 'Downloads', legendBytes: 'Traffic',
+    sharesStatTitle: 'Share Statistics', sharesDaily: 'New Shares per Day', topFiles: 'Top Files', topShares: 'Top Shares', noTopData: 'No data yet',
     quotaBannerT: 'Traffic quota reached — downloads auto-paused',
     quotaBannerD: 'All public download requests are blocked. Raise the limit in Settings or reset this month\'s traffic.',
     times: '', unlimitedShort: 'Unlimited',
@@ -2335,6 +2339,29 @@ async function loadOverview(){
       </div>
     </div>
     <div class="glass section">
+      <div class="section-title"><h2>📈 ${esc(t('trendTitle'))}</h2>
+        <div style="display:flex;gap:6px">
+          <button class="btn sm" id="trend-7">${esc(t('range7'))}</button>
+          <button class="btn sm" id="trend-30">${esc(t('range30'))}</button>
+        </div></div>
+      <div id="trend-chart" style="height:260px"></div>
+    </div>
+    <div class="glass section">
+      <div class="section-title"><h2>🔗 ${esc(t('sharesStatTitle'))}</h2></div>
+      <div style="font-size:12px;color:var(--text-3);margin:4px 0 8px">${esc(t('sharesDaily'))}</div>
+      <div class="chart" id="shares-chart"></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin-top:18px">
+        <div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px">🔥 ${esc(t('topFiles'))}</div>
+          <div id="top-files"></div>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px">⭐ ${esc(t('topShares'))}</div>
+          <div id="top-shares"></div>
+        </div>
+      </div>
+    </div>
+    <div class="glass section">
       <div class="section-title"><h2>🕘 ${esc(t('recentTitle'))}</h2>
         <button class="btn sm" id="goto-logs">${esc(t('viewAll'))}</button></div>
       ${s.recent.length ? `
@@ -2353,6 +2380,77 @@ async function loadOverview(){
       </table></div>` : `<div class="empty"><div class="icon">📥</div>${esc(t('noLogsYet'))}</div>`}
     </div>`;
   $('#goto-logs').onclick = () => switchTab('logs');
+  loadTrendCharts(30);
+}
+
+/* ═══════════ 概览 · 趋势图 + 分享统计（echarts）═══════════ */
+let trendChart = null;
+async function loadTrendCharts(days){
+  const box = $('#trend-chart');
+  if(!box) return;
+  const b7 = $('#trend-7'), b30 = $('#trend-30');
+  if(b7){ b7.classList.toggle('primary', days===7); b7.onclick = () => loadTrendCharts(7); }
+  if(b30){ b30.classList.toggle('primary', days===30); b30.onclick = () => loadTrendCharts(30); }
+  if(trendChart){ try{ trendChart.dispose(); }catch(_){ } trendChart = null; }
+  let d;
+  try {
+    d = await api('/api/admin/stats/charts?days=' + days);
+  } catch {
+    box.innerHTML = `<div class="empty"><div class="icon">📉</div>${esc(t('noTopData'))}</div>`;
+    return;
+  }
+  // ── TOP10 文件 / 分享表格 ──
+  const files = d.top_files || [], shares = d.top_shares || [];
+  $('#top-files').innerHTML = files.length ? `<table class="tbl"><tbody>${files.map((r, i) => `
+    <tr><td class="num" style="width:30px;color:var(--text-3)">${i + 1}</td>
+    <td class="name-cell" title="${esc(r.file_name)}">${ficon(r.file_name)} ${esc(r.file_name)}</td>
+    <td class="num">${r.downloads}</td><td class="num">${fmtSize(r.bytes)}</td></tr>`).join('')}</tbody></table>`
+    : `<div class="empty" style="padding:14px">${esc(t('noTopData'))}</div>`;
+  $('#top-shares').innerHTML = shares.length ? `<table class="tbl"><tbody>${shares.map((r, i) => `
+    <tr><td class="num" style="width:30px;color:var(--text-3)">${i + 1}</td>
+    <td class="name-cell" title="${esc(r.file_name)}">${ficon(r.file_name)} ${esc(r.file_name)}</td>
+    <td class="num">${r.downloads}</td>
+    <td class="num">${r.revoked ? '🚫' : (r.is_market ? '🛒' : '🔗')}</td>
+    <td class="num">${fmtTime(r.created_at)}</td></tr>`).join('')}</tbody></table>`
+    : `<div class="empty" style="padding:14px">${esc(t('noTopData'))}</div>`;
+  // ── 每日新增分享（CSS 小柱状）──
+  const maxSh = Math.max(1, ...d.daily.map(x => x.new_shares));
+  $('#shares-chart').innerHTML = d.daily.map(x => `
+    <div class="col">
+      <div class="bar" style="height:${Math.max(3, Math.round(x.new_shares / maxSh * 112))}px">
+        <span>${x.new_shares}</span>
+      </div>
+      <div class="day">${x.day.slice(5).replace('-','/')}</div>
+    </div>`).join('');
+  // ── echarts 下载/流量趋势 ──
+  try { await ensureECharts(); } catch { return; }
+  const c3 = (getComputedStyle(document.documentElement).getPropertyValue('--text-3') || '#94a3b8').trim();
+  trendChart = echarts.init(box);
+  trendChart.setOption({
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'axis' },
+    legend: { data: [t('legendDl'), t('legendBytes')], textStyle: { color: c3 }, top: 0 },
+    grid: { left: 48, right: 62, top: 34, bottom: 26 },
+    xAxis: { type: 'category', data: d.daily.map(x => x.day.slice(5)),
+      axisLabel: { color: c3 }, axisLine: { lineStyle: { color: c3 } } },
+    yAxis: [
+      { type: 'value', name: t('legendDl'), axisLabel: { color: c3 },
+        splitLine: { lineStyle: { color: 'rgba(128,128,128,0.15)' } } },
+      { type: 'value', name: t('legendBytes'), axisLabel: { color: c3, formatter: v => fmtSize(v) },
+        splitLine: { show: false } },
+    ],
+    series: [
+      { name: t('legendDl'), type: 'bar', data: d.daily.map(x => x.downloads),
+        itemStyle: { borderRadius: [4, 4, 0, 0], color: '#3b82f6' } },
+      { name: t('legendBytes'), type: 'line', yAxisIndex: 1, smooth: true,
+        data: d.daily.map(x => x.bytes),
+        lineStyle: { color: '#f59e0b' }, itemStyle: { color: '#f59e0b' } },
+    ],
+  });
+  if(!window.__trendResizeBound){
+    window.__trendResizeBound = true;
+    window.addEventListener('resize', () => { if(trendChart){ try{ trendChart.resize(); }catch(_){ } } });
+  }
 }
 
 /* ═══════════ 文件 ═══════════ */
