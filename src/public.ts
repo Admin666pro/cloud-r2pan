@@ -1,7 +1,7 @@
 import type { Env, ShareWithFile, DirectLinkWithFile } from "./types";
 import { getSettings, addTraffic, consumePreviewQuota } from "./settings";
 import { parseUA } from "./ua";
-import { clientIp, isAdminWhitelisted } from "./auth";
+import { clientIp, isAdminWhitelisted, rateLimitLogin } from "./auth";
 import { findCodeByString, checkCodeUsable, activateCodeIfNeeded, deductQuota, formatCodeStatus } from "./codes";
 import { errorPage, json } from "./pages";
 import { hmacHex, sha256Hex, randomHex, safeEqual, decryptSecret } from "./crypto";
@@ -360,6 +360,9 @@ export async function handleVerify(req: Request, env: Env, token: string): Promi
     // 无密码分享 → 如果 Turnstile 通过 + 没密码，直接给下载地址
     return json({ ok: true, url: `/s/${token}/download` });
   }
+  // 分享密码防爆破：IP+token 10 次/分钟，叠加同 IP 30 次/分钟（防撒网试多个分享）
+  if (!rateLimitLogin(`sp:${ip}:${token}`, 10, 60_000) || !rateLimitLogin(`spip:${ip}`, 30, 60_000))
+    return json({ error: "too_many_attempts" }, { status: 429 });
   if (!(await verifyPassword(row.password_hash, String(body.password ?? ""))))
     return json({ error: "bad_password" }, { status: 401 });
   const ticket = await issueToken(env, token);

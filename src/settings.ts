@@ -98,6 +98,14 @@ export interface Settings {
    */
   adminIps: string;
 
+  // ═══════ 管理员登录密码（面板可改，与主密钥解耦） ═══════
+  /**
+   * PBKDF2 哈希后的登录密码（格式 pbkdf2-sha256$iter$salt$hash）。
+   * null = 未设置 → 登录回退比对环境变量 admin（兼容老部署）。
+   * ⚠️ 与主密钥 env.admin 解耦：修改这里不影响任何已加密配置。
+   */
+  adminPasswordHash: string | null;
+
   // ═══════ 下载市场首页 ═══════
   /** 是否将根路径 "/" 重定向到下载市场（而不是 /admin）。默认 false。 */
   homeRedirectMarket: boolean;
@@ -282,6 +290,8 @@ export const DEFAULT_SETTINGS: Settings = {
   oauthCustomUserinfoUrl: "",
   oauthCustomTokenField: "access_token",
   adminIps: "",
+  // 管理员登录密码 —— 默认未设置（用环境变量 admin 登录）
+  adminPasswordHash: null,
   // 下载市场
   homeRedirectMarket: false,
   // 激活码浮动按钮
@@ -407,6 +417,7 @@ export async function getSettings(env: Env): Promise<Settings> {
     oauthCustomUserinfoUrl: map.get("oauth_custom_userinfo_url") ?? "",
     oauthCustomTokenField: map.get("oauth_custom_token_field") ?? DEFAULT_SETTINGS.oauthCustomTokenField,
     adminIps: map.get("admin_ips") ?? "",
+    adminPasswordHash: map.get("admin_password_hash") ?? null,
     homeRedirectMarket: map.get("home_redirect_market") === "1",
     // 激活码浮动按钮
     codesFloatingButtonEnabled: map.get("codes_floating_button_enabled") !== "0", // 默认 true

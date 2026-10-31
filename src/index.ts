@@ -15,13 +15,7 @@ import {
 } from "./oauth_handlers";
 import { handleAdminOauthStart, handleAdminOauthCallback } from "./admin_oauth";
 import { findCodeByString, formatCodeStatus, checkCodeUsable, isCodeLenientFormat } from "./codes";
-
-/** 客户端真实 IP：从 CF 头或连接地址取 */
-function clientIp(req: Request): string {
-  const fwd = req.headers.get("cf-connecting-ip");
-  if (fwd) return fwd.split(",")[0].trim();
-  return req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
-}
+import { clientIp } from "./auth";
 
 /**
  * IP 限流（Worker 内存实现）：

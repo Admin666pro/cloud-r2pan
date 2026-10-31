@@ -315,6 +315,7 @@ const I18N = {
     passwordPlaceholder: '输入访问密码', unlock: '解锁下载',
     unlockHint: '输入管理员提供的密码后即可开始下载',
     wrongPassword: '密码错误，请重试',
+    tooManyAttempts: '尝试过于频繁，请一分钟后再试',
     shared: '{d} 分享', expires: '{d} 到期',
     quotaWarn: '⚠️ 本月流量已达预设限额，下载服务已临时暂停，请联系管理员。',
     hint: '下载由 {site} 提供 · 请勿重复下载',
@@ -393,6 +394,7 @@ const I18N = {
     passwordPlaceholder: 'Enter access password', unlock: 'Unlock & Download',
     unlockHint: 'Enter the password provided by the administrator to download',
     wrongPassword: 'Incorrect password, please try again',
+    tooManyAttempts: 'Too many attempts, please try again in a minute',
     shared: 'shared {d}', expires: 'expires {d}',
     quotaWarn: '⚠️ Monthly traffic quota reached. Downloads are temporarily paused. Please contact the administrator.',
     hint: 'Served by {site} · Please avoid duplicate downloads',
@@ -1196,7 +1198,7 @@ async function wireUnlock(d, ts, tsEnabled, tsOnDownload){
         }
         return;
       }
-      err.textContent = t(res.error === 'bad_password' ? 'wrongPassword' : 'wrongPassword');
+      err.textContent = t(res.error === 'too_many_attempts' ? 'tooManyAttempts' : 'wrongPassword');
       $('#pw-box').classList.remove('shake'); void $('#pw-box').offsetWidth; $('#pw-box').classList.add('shake');
       input.select();
     }catch{

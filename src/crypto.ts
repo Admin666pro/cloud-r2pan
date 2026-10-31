@@ -229,6 +229,43 @@ export function totpUri(secretB32: string, issuer: string, account: string): str
   return `otpauth://totp/${encodeURIComponent(issuer + ": " + account)}?${params.toString()}`;
 }
 
+/* ═══════════════════════════════════════════════
+ * PBKDF2 密码哈希 —— 管理员面板登录密码（存 D1）
+ *
+ * 与主密钥 env.admin 解耦：登录密码可随时在后台修改，
+ * 不影响任何用 env.admin 加密的数据。
+ *
+ * 存储格式: pbkdf2-sha256$<iterations>$<saltHex>$<hashHex>
+ * 迭代次数随哈希一起存储，未来可平滑升级强度。
+ * ═══════════════════════════════════════════════ */
+
+const PBKDF2_ITERATIONS = 25_000;
+
+async function pbkdf2Derive(password: string, salt: string, iterations: number): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: new TextEncoder().encode(salt), iterations },
+    key,
+    256
+  );
+  return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** 哈希密码（自动生成随机盐） */
+export async function pbkdf2Hash(password: string): Promise<string> {
+  const salt = randomHex(16);
+  return `pbkdf2-sha256$${PBKDF2_ITERATIONS}$${salt}$${await pbkdf2Derive(password, salt, PBKDF2_ITERATIONS)}`;
+}
+
+/** 校验密码（恒定时间比较；格式非法直接 false） */
+export async function pbkdf2Verify(password: string, stored: string): Promise<boolean> {
+  const parts = stored.split("$");
+  if (parts.length !== 4 || parts[0] !== "pbkdf2-sha256") return false;
+  const iterations = parseInt(parts[1], 10);
+  if (!Number.isInteger(iterations) || iterations < 1 || iterations > 2_000_000) return false;
+  return safeEqual(await pbkdf2Derive(password, parts[2], iterations), parts[3]);
+}
+
 /** 生成一组随机恢复码（8 位数字字符，用空格分组显示） */
 export function totpGenerateRecoveryCodes(n = 8): string[] {
   const codes: string[] = [];
