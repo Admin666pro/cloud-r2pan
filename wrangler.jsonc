@@ -47,10 +47,5 @@
     // 通过 /assets/earth-day.jpg 同源提供，避免依赖外部 CDN（部分网络环境会加载失败，导致地球变白色球体）
     { "type": "Data", "globs": ["**/*.jpg"], "fallthrough": true }
   ],
-  "vars": {
-    "admin": "密码key"
-  },
-
-
   "observability": { "enabled": true }
 }

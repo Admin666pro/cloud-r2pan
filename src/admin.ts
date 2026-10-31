@@ -2,11 +2,11 @@ import type { Env } from "./types";
 import { ensureSchema, randomId, getSchemaStatus, repairDatabase, writeErrorLog } from "./db";
 import { generateCodes, makeBatchId, formatCodeStatus, findCodeByString } from "./codes";
 import { getSettings, updateSettings, parseAdminOauth, serializeAdminOauth, ADMIN_OAUTH_PROVIDER_IDS } from "./settings";
-import { checkAdminKey, createSession, verifySession, clientIp, rateLimitLogin, requireAdminIp } from "./auth";
+import { verifyAdminPassword, passwordFingerprint, createSession, verifySession, clientIp, rateLimitLogin, requireAdminIp } from "./auth";
 import { pickLang } from "./i18n";
 import { hashPassword } from "./public";
 import { parseUA } from "./ua";
-import { encryptSecret, decryptSecret, totpGenerateSecret, totpVerify, totpUri, totpGenerateRecoveryCodes, sha256Hex, safeEqual } from "./crypto";
+import { encryptSecret, decryptSecret, totpGenerateSecret, totpVerify, totpUri, totpGenerateRecoveryCodes, sha256Hex, safeEqual, pbkdf2Hash } from "./crypto";
 import { createStorageProvider, type StorageProvider } from "./storage";
 import { buildAdminOauthAuthorizeUrl, ADMIN_OAUTH_INTENT_BIND, isAdminOauthProvider, adminOauthCallbackUrl } from "./admin_oauth";
 import { getBuiltinProvider } from "./oauth";
@@ -117,7 +117,8 @@ function buildDirectUrl(token: string, fileName?: string | null, downloadName?: 
 }
 
 async function requireAuth(req: Request, env: Env): Promise<Response | null> {
-  if (!(await verifySession(req, env))) {
+  const s = await getSettings(env);
+  if (!(await verifySession(req, env, await passwordFingerprint(s)))) {
     return json({ error: "unauthorized" }, 401);
   }
   return null;
@@ -175,13 +176,13 @@ export async function handleAdminApi(
     if (!env.admin)
       return json({ error: msg(req, "未设置 admin 密钥，请先执行 npx wrangler secret put admin", "admin is not set. Run: npx wrangler secret put admin") }, 500);
     const body = await readJson<{ key: string; code?: string }>(req);
-    if (!body.key || !checkAdminKey(env, body.key)) {
+    const s = await getSettings(env);
+    if (!body.key || !(await verifyAdminPassword(env, s, body.key))) {
       ctx.waitUntil(writeLoginLog(env, req, "login", "fail", "invalid_key"));
       return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
     }
 
     // 密码正确 —— 检查是否需要 2FA
-    const s = await getSettings(env);
     const needsTotp = s.totpEnabled && s.totpSecretCipher;
 
     if (needsTotp) {
@@ -199,7 +200,7 @@ export async function handleAdminApi(
         return new Response(JSON.stringify({ ok: true }), {
           headers: {
             "content-type": "application/json;charset=utf-8",
-            "set-cookie": await createSession(env, url.protocol === "https:"),
+            "set-cookie": await createSession(env, url.protocol === "https:", await passwordFingerprint(s)),
             "cache-control": "no-store",
           },
         });
@@ -221,7 +222,7 @@ export async function handleAdminApi(
         return new Response(JSON.stringify({ ok: true, recovery_used: true, totp_reset: true }), {
           headers: {
             "content-type": "application/json;charset=utf-8",
-            "set-cookie": await createSession(env, url.protocol === "https:"),
+            "set-cookie": await createSession(env, url.protocol === "https:", await passwordFingerprint(s)),
             "cache-control": "no-store",
           },
         });
@@ -248,7 +249,7 @@ export async function handleAdminApi(
           return new Response(JSON.stringify({ ok: true, recovery_used: true, totp_reset: true }), {
             headers: {
               "content-type": "application/json;charset=utf-8",
-              "set-cookie": await createSession(env, url.protocol === "https:"),
+              "set-cookie": await createSession(env, url.protocol === "https:", await passwordFingerprint(s)),
               "cache-control": "no-store",
             },
           });
@@ -265,7 +266,38 @@ export async function handleAdminApi(
     return new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json;charset=utf-8",
-        "set-cookie": await createSession(env, url.protocol === "https:"),
+        "set-cookie": await createSession(env, url.protocol === "https:", await passwordFingerprint(s)),
+        "cache-control": "no-store",
+      },
+    });
+  }
+
+  // ── 修改登录密码（面板密码，与主密钥 env.admin 解耦） ──────────
+  //    设置后：登录只认面板密码；env.admin 退化为纯主密钥（加解密/签名用）。
+  //    改密成功 → 重签当前会话（本设备保持登录），其他设备因指纹变化全部失效。
+  //    紧急恢复：删除 D1 settings 表中的 admin_password_hash 行 → 回退 env.admin 登录。
+  if (path === "/api/admin/password/change" && method === "POST") {
+    const auth = await requireAuth(req, env);
+    if (auth) return auth;
+    const body = await readJson<{ current?: string; next?: string }>(req);
+    const current = String(body.current ?? "");
+    const next = String(body.next ?? "");
+    if (next.length < 8 || next.length > 128) {
+      return json({ error: msg(req, "新密码长度需在 8-128 位之间", "New password must be 8-128 characters") }, 400);
+    }
+    const s = await getSettings(env);
+    if (!(await verifyAdminPassword(env, s, current))) {
+      ctx.waitUntil(writeLoginLog(env, req, "password_change", "fail", "wrong_current"));
+      return json({ error: msg(req, "当前密码错误", "Current password is incorrect") }, 403);
+    }
+    await updateSettings(env, { admin_password_hash: await pbkdf2Hash(next) });
+    ctx.waitUntil(writeLoginLog(env, req, "password_change", "success"));
+    // updateSettings 已失效缓存，重读拿到新哈希 → 新指纹
+    const s2 = await getSettings(env);
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: {
+        "content-type": "application/json;charset=utf-8",
+        "set-cookie": await createSession(env, url.protocol === "https:", await passwordFingerprint(s2)),
         "cache-control": "no-store",
       },
     });
@@ -359,6 +391,8 @@ export async function handleAdminApi(
       ok: true,
       site_title: s.siteTitle,
       totp_enabled: s.totpEnabled,
+      // 面板登录密码是否已设置（false = 仍在用环境变量 admin 登录）
+      password_set: !!s.adminPasswordHash,
       cloudflare_recovery: !!env.totp_recovery,
       recovery_remaining: s.totpRecoveryHash ? s.totpRecoveryHash.split(",").filter(Boolean).length : 0,
       ui_theme: s.uiTheme,
@@ -1201,7 +1235,7 @@ export async function handleAdminApi(
   // ── 2FA Setup：生成新 secret（未启用，需要 verify+enable 才生效） ──
   if (path === "/api/admin/2fa/setup" && method === "POST") {
     const body = await readJson<{ admin_key: string }>(req);
-    if (!body.admin_key || !checkAdminKey(env, body.admin_key)) {
+    if (!body.admin_key || !(await verifyAdminPassword(env, await getSettings(env), body.admin_key))) {
       return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
     }
     // 如果已经启用，需要先 disable 再 setup（或者覆盖）
@@ -1218,7 +1252,7 @@ export async function handleAdminApi(
   // ── 2FA Enable：验证通过后写入 settings（加密存储）并生成恢复码 ──
   if (path === "/api/admin/2fa/enable" && method === "POST") {
     const body = await readJson<{ admin_key: string; code: string; secret: string }>(req);
-    if (!body.admin_key || !checkAdminKey(env, body.admin_key)) {
+    if (!body.admin_key || !(await verifyAdminPassword(env, await getSettings(env), body.admin_key))) {
       return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
     }
     if (!/^[A-Z2-7]{16,}$/.test((body.secret || "").toUpperCase())) {
@@ -1251,7 +1285,7 @@ export async function handleAdminApi(
   // ── 2FA Disable：关闭 2FA（需验证 admin key） ──
   if (path === "/api/admin/2fa/disable" && method === "POST") {
     const body = await readJson<{ admin_key: string }>(req);
-    if (!body.admin_key || !checkAdminKey(env, body.admin_key)) {
+    if (!body.admin_key || !(await verifyAdminPassword(env, await getSettings(env), body.admin_key))) {
       return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
     }
     await updateSettings(env, {
@@ -1265,7 +1299,7 @@ export async function handleAdminApi(
   // ── 重新生成恢复码（覆盖旧的，旧的全部失效） ──
   if (path === "/api/admin/2fa/regen-recovery" && method === "POST") {
     const body = await readJson<{ admin_key: string }>(req);
-    if (!body.admin_key || !checkAdminKey(env, body.admin_key)) {
+    if (!body.admin_key || !(await verifyAdminPassword(env, await getSettings(env), body.admin_key))) {
       return json({ error: msg(req, "管理密钥错误", "Invalid admin key") }, 401);
     }
     const s = await getSettings(env);
@@ -1482,6 +1516,8 @@ export async function handleAdminApi(
       oauth_has_enabled_providers: enabledProviders.length > 0,
       // IP 白名单
       admin_ips: s.adminIps,
+      // 面板登录密码是否已设置（false = 仍在用环境变量 admin 登录）
+      password_set: !!s.adminPasswordHash,
       // 下载市场首页
       home_redirect_market: s.homeRedirectMarket,
       // 激活码浮动按钮

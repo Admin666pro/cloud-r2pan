@@ -867,6 +867,22 @@ const I18N = {
     twofaRecoveryRemaining: '剩余恢复码 {n} 个',
     twofaStatusOn: '已开启',
     twofaStatusOff: '未开启',
+    // 登录密码（面板密码，与主密钥解耦）
+    pwTitle: '登录密码',
+    pwD: '设置后登录只认此密码，环境变量 admin 退化为纯加密主密钥（不再用于登录）。改密后其他设备会自动退出，当前设备保持登录。',
+    pwCurrent: '当前密码',
+    pwCurrentPhEnv: '尚未设置过面板密码，请填环境变量 admin 的值',
+    pwCurrentPhPanel: '输入当前登录密码',
+    pwNew: '新密码',
+    pwNewPh: '至少 8 位',
+    pwConfirm: '确认新密码',
+    pwSave: '修改密码',
+    pwSaving: '保存中…',
+    pwMismatch: '两次输入的新密码不一致',
+    pwTooShort: '新密码长度需在 8-128 位之间',
+    pwOk: '密码已更新 ✅ 本设备保持登录，其他设备已退出',
+    pwStatusEnv: '当前使用环境变量 admin 登录（尚未设置面板密码）',
+    pwStatusPanel: '已使用面板密码登录 ✅',
     // Turnstile
     tsGroupTitle: '🛡️ Cloudflare Turnstile 人机验证',
     tsGroupD: '防止机器人爬虫滥用分享链接。可按触发时机选择开启，并按每日访问阈值决定对某 IP 是否弹出。',
@@ -1306,6 +1322,22 @@ const I18N = {
     twofaRecoveryRemaining: '{n} recovery codes remaining',
     twofaStatusOn: 'Enabled',
     twofaStatusOff: 'Disabled',
+    // Panel login password
+    pwTitle: 'Login Password',
+    pwD: 'Once set, login only accepts this password. The admin env var becomes a pure encryption master key (no longer used for login). Other devices get logged out; this one stays signed in.',
+    pwCurrent: 'Current password',
+    pwCurrentPhEnv: 'Not set before — enter the admin env var value',
+    pwCurrentPhPanel: 'Enter current login password',
+    pwNew: 'New password',
+    pwNewPh: 'At least 8 characters',
+    pwConfirm: 'Confirm new password',
+    pwSave: 'Change password',
+    pwSaving: 'Saving…',
+    pwMismatch: 'New passwords do not match',
+    pwTooShort: 'New password must be 8-128 characters',
+    pwOk: 'Password updated ✅ This device stays signed in, other devices were logged out.',
+    pwStatusEnv: 'Currently logging in with the admin env var (no panel password set)',
+    pwStatusPanel: 'Using panel password ✅',
     // Turnstile
     tsGroupTitle: '🛡️ Cloudflare Turnstile',
     tsGroupD: 'Block bots from abusing your share links. Choose when to trigger and set a daily per-IP threshold to decide who gets challenged.',
@@ -4302,6 +4334,23 @@ async function loadSettings(){
         </select>
       </div>
     </div>
+    <!-- 登录密码组（面板密码，与主密钥 env.admin 解耦） -->
+    <div class="glass group">
+      <div class="row">
+        <div class="info"><div class="t">🔑 ${esc(t('pwTitle'))}</div><div class="d">${esc(t('pwD'))}</div></div>
+      </div>
+      <div class="row" style="flex-direction:column;align-items:stretch;gap:10px">
+        <div style="font-size:12.5px;color:var(--text-3);line-height:1.7">
+          ${s.password_set ? `<span style="color:#6ee7b7">${esc(t('pwStatusPanel'))}</span>` : `<span style="color:#a5b4fc">${esc(t('pwStatusEnv'))}</span>`}
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input type="password" id="pw-current" autocomplete="current-password" placeholder="${esc(t('pwCurrent'))}：${esc(s.password_set ? t('pwCurrentPhPanel') : t('pwCurrentPhEnv'))}" style="flex:1;min-width:200px;padding:9px 14px;border-radius:12px;background:var(--sf-input);border:1px solid var(--stroke-strong);color:var(--text);font-size:14px;font-family:inherit;outline:none">
+          <input type="password" id="pw-next" autocomplete="new-password" placeholder="${esc(t('pwNew'))}（${esc(t('pwNewPh'))}）" style="flex:1;min-width:200px;padding:9px 14px;border-radius:12px;background:var(--sf-input);border:1px solid var(--stroke-strong);color:var(--text);font-size:14px;font-family:inherit;outline:none">
+          <input type="password" id="pw-confirm" autocomplete="new-password" placeholder="${esc(t('pwConfirm'))}" style="flex:1;min-width:200px;padding:9px 14px;border-radius:12px;background:var(--sf-input);border:1px solid var(--stroke-strong);color:var(--text);font-size:14px;font-family:inherit;outline:none">
+          <button class="btn sm primary" id="pw-save">${esc(t('pwSave'))}</button>
+        </div>
+      </div>
+    </div>
     <!-- 2FA 组 -->
     <div class="glass group">
       <div class="row">
@@ -4842,6 +4891,24 @@ async function loadSettings(){
       await api(`/api/admin/oauth/providers/${id}`, { method:'DELETE' });
       loadSettings();
     }
+  });
+
+  // 修改登录密码（面板密码，与主密钥解耦）
+  $('#pw-save')?.addEventListener('click', async () => {
+    const current = $('#pw-current').value;
+    const next = $('#pw-next').value;
+    const confirmVal = $('#pw-confirm').value;
+    if(next.length < 8 || next.length > 128) return toast(t('pwTooShort'), 'err');
+    if(next !== confirmVal) return toast(t('pwMismatch'), 'err');
+    const btn = $('#pw-save');
+    btn.disabled = true; btn.textContent = t('pwSaving');
+    try{
+      await api('/api/admin/password/change', { method:'POST', body: JSON.stringify({ current, next }) });
+      toast(t('pwOk'));
+      $('#pw-current').value = ''; $('#pw-next').value = ''; $('#pw-confirm').value = '';
+      loadSettings(); // 重读 password_set，刷新状态行
+    }catch(err){ toast(err.message, 'err'); }
+    finally{ btn.disabled = false; btn.textContent = t('pwSave'); }
   });
 
   // 2FA Setup

@@ -1,5 +1,6 @@
 import type { Env } from "./types";
-import { hmacB64url, safeEqual } from "./crypto";
+import type { Settings } from "./settings";
+import { hmacB64url, safeEqual, pbkdf2Verify, sha256Hex } from "./crypto";
 
 const COOKIE_NAME = "cd_admin";
 const SESSION_TTL_MS = 7 * 24 * 3600 * 1000; // 7 天
@@ -13,31 +14,54 @@ function getCookie(req: Request, name: string): string | null {
   return null;
 }
 
-/** 登录成功后签发会话 Cookie */
-export async function createSession(env: Env, secure = false): Promise<string> {
+/**
+ * 会话指纹 —— 把会话签名与「当前登录密码」绑定。
+ * 面板密码一改，指纹变化，所有旧会话立即失效（其他设备需重新登录）。
+ * 未设置面板密码时返回 "env"（兼容期：会话仅绑定 env.admin）。
+ */
+export async function passwordFingerprint(s: Settings): Promise<string> {
+  if (!s.adminPasswordHash) return "env";
+  return (await sha256Hex("pwfp:" + s.adminPasswordHash)).slice(0, 16);
+}
+
+/** 登录成功后签发会话 Cookie（token = exp.fp.sig，fp 为密码指纹） */
+export async function createSession(env: Env, secure = false, pwFp = "env"): Promise<string> {
   const exp = Date.now() + SESSION_TTL_MS;
-  const sig = await hmacB64url(env.admin, String(exp));
-  const token = `${exp}.${sig}`;
+  const sig = await hmacB64url(env.admin, `${exp}.${pwFp}`);
+  const token = `${exp}.${pwFp}.${sig}`;
   // Secure 标志仅在 HTTPS 下追加，兼容本地 http 调试
   const secureFlag = secure ? "; Secure" : "";
   return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_TTL_MS / 1000}${secureFlag}`;
 }
 
 /** 校验会话 Cookie，返回是否有效 */
-export async function verifySession(req: Request, env: Env): Promise<boolean> {
+export async function verifySession(req: Request, env: Env, pwFp = "env"): Promise<boolean> {
   const token = getCookie(req, COOKIE_NAME);
   if (!token) return false;
-  const dot = token.indexOf(".");
-  if (dot < 0) return false;
-  const exp = token.slice(0, dot);
-  const sig = token.slice(dot + 1);
-  if (!/^\d+$/.test(exp) || Number(exp) < Date.now()) return false;
-  const expect = await hmacB64url(env.admin, exp);
-  return safeEqual(sig, expect);
+  const seg = token.split(".");
+  // 新版三段式：exp.fp.sig —— 指纹必须与当前密码匹配（改密后旧会话失效）
+  if (seg.length === 3) {
+    const [exp, fp, sig] = seg;
+    if (!/^\d+$/.test(exp) || Number(exp) < Date.now()) return false;
+    if (fp !== pwFp) return false;
+    return safeEqual(sig, await hmacB64url(env.admin, `${exp}.${fp}`));
+  }
+  // 旧版两段式（升级兼容）：exp.sig，仅在「未设置面板密码」时继续有效
+  if (seg.length === 2 && pwFp === "env") {
+    const [exp, sig] = seg;
+    if (!/^\d+$/.test(exp) || Number(exp) < Date.now()) return false;
+    return safeEqual(sig, await hmacB64url(env.admin, exp));
+  }
+  return false;
 }
 
-/** 校验登录密钥（恒定时间比较，直接比字符串即可，无需 HMAC 包装） */
-export function checkAdminKey(env: Env, input: string): boolean {
+/**
+ * 校验管理员登录密码：
+ *   1. D1 已设置面板密码 → PBKDF2 校验（env.admin 不再用于登录）
+ *   2. 未设置 → 回退恒定时间比对环境变量 admin（兼容老部署 / 紧急恢复）
+ */
+export async function verifyAdminPassword(env: Env, s: Settings, input: string): Promise<boolean> {
+  if (s.adminPasswordHash) return pbkdf2Verify(input, s.adminPasswordHash);
   if (!env.admin) return false;
   return safeEqual(input, env.admin);
 }

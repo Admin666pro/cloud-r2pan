@@ -33,7 +33,7 @@ import {
   ADMIN_OAUTH_PROVIDER_IDS,
 } from "./settings";
 import { decryptSecret } from "./crypto";
-import { createSession, clientIp } from "./auth";
+import { createSession, clientIp, passwordFingerprint } from "./auth";
 import { createOAuthState, verifyOAuthState, getBuiltinProvider } from "./oauth";
 import { parseUA } from "./ua";
 
@@ -179,8 +179,8 @@ export async function handleAdminOauthCallback(req: Request, env: Env): Promise<
     return redirectToAdmin(req, { oauth_error: "not_bound", oauth_provider: providerId });
   }
 
-  // 签发管理员会话 Cookie
-  const cookie = await createSession(env, url.protocol === "https:");
+  // 签发管理员会话 Cookie（绑定当前登录密码指纹）
+  const cookie = await createSession(env, url.protocol === "https:", await passwordFingerprint(await getSettings(env)));
   await writeLoginLog(env, req, "success", `${providerId}_oauth`);
   return new Response(null, {
     status: 302,
