@@ -65,7 +65,7 @@ npx wrangler login
 
 | Variable name | Value | 必填 |
 |---|---|---|
-| `admin` | 你自己设定的管理后台密码（比如 `MyStr0ng!Pass`） | ✅ 必须 |
+| `admin` | 你自己设定的管理后台初始登录密码（比如 `MyStr0ng!Pass`），同时是加密主密钥 | ✅ 必须 |
 | `totp_recovery` | 任意字符串，用作 2FA 万能恢复码（忘 Authenticator 时救回） | ❌ 可选 |
 | `turnstile_sitekey` | Cloudflare Turnstile 控制台申请 | ❌ 可选 |
 | `turnstile_secret` | Cloudflare Turnstile 控制台申请 | ❌ 可选（不配则 Turnstile 整体不生效） |
@@ -73,6 +73,8 @@ npx wrangler login
 > Turnstile 申请方式：Cloudflare 左侧菜单 → **Turnstile** → **Add site** → Site name 随便填，Domain 填你最终用的域名（workers.dev 子域或自定义域），拿 Sitekey 和 Secret key。
 
 每加一个 Secret 点 **Save**。
+
+> 💡 **登录密码与主密钥已分离**：部署后建议进 管理后台 → 设置 → 「🔑 登录密码」设置你自己的面板密码——之后登录只认面板密码（以后改密码都在网页里点一下，无需碰这里），`admin` 退化为纯加密主密钥，平时无需再动。万一忘了面板密码：D1 控制台执行 `DELETE FROM settings WHERE key = 'admin_password_hash';` 即可回退用 `admin` 登录。
 
 ---
 

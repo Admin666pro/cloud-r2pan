@@ -174,7 +174,7 @@ export async function handleAdminApi(
       return json({ error: msg(req, "尝试过于频繁，请稍后再试", "Too many attempts. Please try again later.") }, 429);
     }
     if (!env.admin)
-      return json({ error: msg(req, "未设置 admin 密钥，请先执行 npx wrangler secret put admin", "admin is not set. Run: npx wrangler secret put admin") }, 500);
+      return json({ error: msg(req, "未设置 admin 主密钥：请打开 Cloudflare 控制台 → Workers & Pages → 本项目 → Settings → Variables and Secrets，添加名为 admin 的 Secret 后重试（命令行用户可执行 npx wrangler secret put admin）", "admin master key is not set: open Cloudflare Dashboard → Workers & Pages → this Worker → Settings → Variables and Secrets, add a Secret named admin, then retry (CLI users: npx wrangler secret put admin)") }, 500);
     const body = await readJson<{ key: string; code?: string }>(req);
     const s = await getSettings(env);
     if (!body.key || !(await verifyAdminPassword(env, s, body.key))) {
