@@ -322,7 +322,7 @@ const I18N = {
     remaining: '剩余',
     copyDirectLink: '复制直链',
     copied: '已复制',
-    switchTo: '繁體中文',
+    switchTo: '台灣繁體',
     // Turnstile
     turnstileBlocked: '🛡️ 需要完成人机验证',
     turnstileHint: '该链接被管理员设为需要验证，请完成下方的人机检查后继续下载',
@@ -380,6 +380,84 @@ const I18N = {
     qrTitle: '扫码打开',
     qrHint: '用手机相机扫描二维码即可打开此分享链接',
     qrFail: '二维码加载失败',
+  }, 'zh-HK': {
+    pageTitle: '分享 · {site}',
+    loading: '正在加載分享信息…',
+    notFoundTitle: '鏈接不存在', notFoundMsg: '該分享鏈接無效，或已被管理員刪除。',
+    goneTitle: '鏈接已失效', goneMsg: '該分享已被管理員撤銷。',
+    expiredTitle: '鏈接已過期', expiredMsg: '該分享已超過有效期，無法繼續下載。',
+    maxedTitle: '下載次數已達上限', maxedMsg: '該資源允許下載 {n} 次，名額已用完。',
+    downloads: '下載次數', limit: '次數上限', size: '文件大小',
+    download: '下載文件',
+    protected: '🔒 該分享受密碼保護',
+    passwordPlaceholder: '輸入訪問密碼', unlock: '解鎖下載',
+    unlockHint: '輸入管理員提供的密碼後即可開始下載',
+    wrongPassword: '密碼錯誤，請重試',
+    tooManyAttempts: '嘗試過於頻繁，請一分鐘後再試',
+    shared: '{d} 分享', expires: '{d} 到期',
+    quotaWarn: '⚠️ 本月流量已達預設限額，下載服務已臨時暫停，請聯繫管理員。',
+    hint: '下載由 {site} 提供 · 請勿重複下載',
+    remaining: '剩餘',
+    copyDirectLink: '複製直鏈',
+    copied: '已複製',
+    switchTo: 'English',
+    // Turnstile
+    turnstileBlocked: '🛡️ 需要完成人機驗證',
+    turnstileHint: '該鏈接被管理員設為需要驗證，請完成下方的人機檢查後繼續下載',
+    turnstileLoading: '正在加載驗證組件…',
+    turnstilePass: '驗證通過 ✓',
+    turnstileFail: '驗證失敗，請重試',
+    turnstileContinue: '繼續下載',
+    turnstileDownloadNow: '立即下載',
+    // OAuth2
+    oauthLogin: '使用 {provider} 登錄',
+    oauthLoggedInAs: '已登錄 {provider}',
+    oauthLogout: '退出',
+    oauthContinueDownload: '繼續下載',
+    oauthHint: '該資源需要通過第三方賬號驗證後才能下載',
+    oauthErrTitle: '登錄失敗',
+    oauthErrMsg: 'OAuth 登錄過程中出錯了，請重試或換一個方式下載。',
+    oauthRetry: '重試',
+    oauthSkip: '跳過登錄（可能被拒絕）',
+    // 激活碼（浮動按鈕 + 彈窗）
+    codeFloatingTitle: '🎟️ 激活碼',
+    codeFloatingHint: '使用激活碼可繞過月度流量限額，享獨立額度下載',
+    codeBound: '已綁定的激活碼',
+    codeUnbind: '解綁',
+    codeInputPh: '輸入 R2PAN-XXXX-XXXX-XXXX',
+    codeQuery: '查詢額度',
+    codeBind: '綁定並下載',
+    codeBindSuccess: '激活碼已綁定',
+    codeBindFailed: '綁定失敗：{msg}',
+    codeCheckOk: '剩餘 {remaining} / 總 {total}',
+    codeCheckInfinite: '剩餘 ∞ (無限額度)',
+    codeCheckBad: '查詢失敗：{msg}',
+    codeStatusUnused: '未使用',
+    codeStatusActive: '使用中',
+    codeStatusRevoked: '已作廢',
+    codeStatusExpired: '已過期',
+    codeStatusExhausted: '已耗盡',
+    codeNotBound: '未綁定激活碼',
+    // 在線預覽
+    previewOnline: '在線預覽',
+    previewRemaining: '剩餘預覽次數 {n} 次',
+    previewRemainingInf: '預覽次數不限',
+    previewLimitReached: '預覽次數已達上限（{n} 次），已停止在線預覽',
+    previewTitle: '在線預覽',
+    previewLoading: '正在加載預覽…',
+    previewFail: '預覽加載失敗',
+    previewNotSupported: '該文件類型暫不支持在線預覽',
+    previewTraffic: '本月流量已達限額，預覽已暫停',
+    previewNeedOauth: '該分享需要登錄後才能預覽',
+    previewTruncated: '內容較大，僅顯示開頭部分',
+    zipTitle: '壓縮包內容',
+    zipEmpty: '壓縮包為空',
+    zipTruncated: '條目過多，僅顯示前部分內容',
+    // 二維碼
+    showQr: '二維碼',
+    qrTitle: '掃碼打開',
+    qrHint: '用手機相機掃描二維碼即可打開此分享鏈接',
+    qrFail: '二維碼加載失敗',
   }, 'zh-TW': {
     pageTitle: '分享 · {site}',
     loading: '正在載入分享資訊…',
@@ -400,7 +478,7 @@ const I18N = {
     remaining: '剩餘',
     copyDirectLink: '複製直鏈',
     copied: '已複製',
-    switchTo: 'English',
+    switchTo: '香港繁體',
     // Turnstile
     turnstileBlocked: '🛡️ 需要完成人機驗證',
     turnstileHint: '該連結被管理員設為需要驗證，請完成下方的人機檢查後繼續下載',
@@ -544,15 +622,16 @@ const I18N = {
 function detectLang(){
   try {
     const saved = localStorage.getItem('cd_lang');
-    if (['zh', 'zh-TW', 'en'].includes(saved)) return saved;
+    if (['zh', 'zh-TW', 'zh-HK', 'en'].includes(saved)) return saved;
   } catch {}
   const first = String((navigator.languages && navigator.languages.length ? navigator.languages[0] : navigator.language) || '').toLowerCase();
-  if (first.startsWith('zh')) return /hant|tw|hk|mo/.test(first) ? 'zh-TW' : 'zh';
+  if (first.startsWith('zh')) return /hk|mo/.test(first) ? 'zh-HK' : /hant|tw/.test(first) ? 'zh-TW' : 'zh';
   if (first) return 'en';
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
     if (/^Asia\/(Shanghai|Chongqing|Harbin|Urumqi|Kashgar)$/.test(tz)) return 'zh';
-    if (/^Asia\/(Hong_Kong|Macau|Taipei)$/.test(tz)) return 'zh-TW';
+    if (/^Asia\/(Hong_Kong|Macau)$/.test(tz)) return 'zh-HK';
+    if (/^Asia\/Taipei$/.test(tz)) return 'zh-TW';
   } catch {}
   return 'en';
 }
@@ -565,11 +644,11 @@ const t = (key, params) => {
   return s;
 };
 
-document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : LANG === 'zh-TW' ? 'zh-TW' : 'en';
+document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : LANG === 'zh-TW' ? 'zh-TW' : LANG === 'zh-HK' ? 'zh-HK' : 'en';
 $('#loading-text').textContent = t('loading');
-$('#lang-toggle').textContent = ({ 'zh': '繁體中文', 'zh-TW': 'English', 'en': '简体中文' })[LANG] || t('switchTo');
+$('#lang-toggle').textContent = ({ 'zh': '台灣繁體', 'zh-TW': '香港繁體', 'zh-HK': 'English', 'en': '简体中文' })[LANG] || t('switchTo');
 $('#lang-toggle').onclick = () => {
-  try { localStorage.setItem('cd_lang', LANG === 'zh' ? 'zh-TW' : LANG === 'zh-TW' ? 'en' : 'zh'); } catch {}
+  try { localStorage.setItem('cd_lang', LANG === 'zh' ? 'zh-TW' : LANG === 'zh-TW' ? 'zh-HK' : LANG === 'zh-HK' ? 'en' : 'zh'); } catch {}
   location.reload();
 };
 
