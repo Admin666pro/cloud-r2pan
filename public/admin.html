@@ -636,7 +636,7 @@ const I18N = {
     // 通用
     login: '登录', logout: '退出', cancel: '取消', confirm: '确定', copy: '复制', close: '关闭',
     copied: '已复制到剪贴板', save: '保存设置', saved: '设置已保存', forever: '永久',
-    switchTo: 'EN', topbarSub: '管理后台 · Cloudflare Workers + R2',
+    switchTo: '繁體中文', topbarSub: '管理后台 · Cloudflare Workers + R2',
     // 登录
     loginSubtitle: '管理后台 · 请输入管理密钥登录', keyPlaceholder: '管理密钥 (admin)',
     // 标签
@@ -1087,13 +1087,469 @@ const I18N = {
     codesQueryResult: '剩余 {remaining} / 总 {total}',
     codesQueryResultInfinite: '剩余 ∞ (无限额度)',
     codesPerBatch: '批次 {id}',
+  }, 'zh-TW': {
+    docTitle: '{site} · 管理後臺',
+    // 通用
+    login: '登入', logout: '退出', cancel: '取消', confirm: '確定', copy: '複製', close: '關閉',
+    copied: '已複製到剪貼簿', save: '儲存設定', saved: '設定已儲存', forever: '永久',
+    switchTo: 'English', topbarSub: '管理後臺 · Cloudflare Workers + R2',
+    // 登入
+    loginSubtitle: '管理後臺 · 請輸入管理金鑰登入', keyPlaceholder: '管理金鑰 (admin)',
+    // 標籤
+    tabOverview: '概覽', tabFiles: '檔案', tabStorage: '儲存瀏覽', tabShares: '分享', tabDirect: '直鏈', tabLogs: '記錄', tabBans: '封禁', tabGlobal: '全球分佈', tabSecurity: '安全', tabSettings: '設定', tabWebDAV: 'WebDAV',
+    navContent: '內容管理', navAnalytics: '運營分析', navSecurity: '安全中心', navSystem: '系統設定',
+    // 概覽
+    statTraffic: '本月流量', usedPercent: '已用 {n}% · 跨月自動重置', noLimit: '未設定限額',
+    statDownloads: '累計下載', todayN: '今日 {n} 次', statFiles: '檔案總數', storedR2: '儲存於 R2 物件儲存',
+    statShares: '分享連結', sharesFoot: '有效 {a} 個 · 封禁 IP {b} 個',
+    chartTitle: '近 14 天下載趨勢', recentTitle: '最近下載', viewAll: '檢視全部', noLogsYet: '還沒有下載記錄',
+    trendTitle: '下載 / 流量趨勢', range7: '7 天', range30: '30 天', legendDl: '下載次數', legendBytes: '流量',
+    sharesStatTitle: '分享統計', sharesDaily: '每日新增分享', topFiles: '熱門檔案 TOP10', topShares: '熱門分享 TOP10', noTopData: '暫無資料',
+    quotaBannerT: '流量已達預設限額，下載服務已自動暫停',
+    quotaBannerD: '所有公開下載請求都會被攔截。你可以在「設定」中調高限額，或重置本月流量。',
+    times: '次', unlimitedShort: '無限',
+    // 表格列
+    colFile: '檔案', colIP: 'IP', colBrowser: '瀏覽器', colOS: '系統', colTraffic: '流量', colTime: '時間',
+    colCountry: '國家', colName: '檔名', colSize: '大小', colShareCount: '分享數', colDownloads: '下載量',
+    colUploaded: '上傳時間', colActions: '操作', colLink: '連結', colCreated: '建立時間',
+    colExpires: '有效期', colStatus: '狀態', colReason: '原因', colBannedAt: '封禁時間', colUntil: '到期',
+    // 檔案
+    dropTitle: '拖拽檔案到此處，或點選上傳',
+    dropDesc: '單檔案最大 100 MB（Workers 請求限制）· 直傳物件儲存',
+    dropDescBig: '≤100 MB 直傳 · 更大檔案自動分片上傳（可在設定中關閉）',
+    allFiles: '全部檔案', noFiles: '還沒有檔案，上傳一個試試', createShare: '建立分享', createDirect: '建立直鏈', del: '刪除',
+    tooLarge: '「{name}」超過 100 MB 限制', uploadOk: '「{name}」上傳成功', uploadFail: '「{name}」上傳失敗',
+    uploadDone: '完成 ✅', uploadFailShort: '失敗',
+    uploadAborted: '「{name}」已取消，分片已清理', partRetry: '「{name}」分片 {n} 失敗，重試中…',
+    bigUploadOff: '「{name}」超過 100 MB，且大檔案上傳功能已在設定中關閉',
+    backendNoBig: '「{name}」超過 100 MB：當前儲存後端不支援分片上傳（僅 R2 / S3 支援）',
+    // 分享彈窗
+    shareModalTitle: '建立分享連結', shareModalSub: '生成公開下載連結，可設定有效期與下載次數上限',
+    validity: '有效期', perm: '永久有效', h1: '1 小時', d1: '1 天', d7: '7 天', d30: '30 天',
+    sharePassword: '訪問密碼（可選）', sharePasswordPh: '留空則無需密碼',
+    sharePasswordHint: '設定後，訪客需輸入密碼才能下載。',
+    downloadName: '下載時顯示名（可選）', downloadNamePh: '留空則用原始檔名',
+    downloadNameHint: '訪客下載時看到的檔名，隱藏真實路徑中的敏感資訊。',
+    maxDownloadsLabel: '下載次數上限（留空或 0 = 不限）', unlimitedPlaceholder: '不限',
+    maxTip: '達到上限後連結自動失效。單 IP 重複下載限制由「設定」統一控制。',
+    previewLimit: '線上預覽月度總額度', previewLimitD: '全站所有分享共用的月度預覽總次數（預設 4），用完即停止預覽、下個月自動重置。設為 0 表示不限制。本月已用 {used} 次。',
+    showQr: '二維碼', qrTitle: '掃碼開啟', qrHint: '用手機相機掃描二維碼即可開啟此連結', qrLoading: '生成中…', qrFail: '二維碼生成失敗',
+    generate: '生成連結', shareCreated: '分享連結已建立 ✨', shareCreatedSub: '複製下面的連結發給需要的人',
+    sharePageLink: '分享頁（訪客先看到密碼/驗證頁）',
+    directModalTitle: '建立直鏈', directModalSub: '生成一個拿了就能下的直鏈，無密碼無介面',
+    preview: '預覽分享頁',
+    // 分享列表
+    sharesTitle: '分享連結', cleanup: '清理失效分享',
+    stActive: '有效', stExpired: '已過期', stRevoked: '已撤銷', stMaxed: '已滿額',
+    revoke: '撤銷', noShares: '還沒有分享連結，去「檔案」頁建立一個',
+    confirmCleanupT: '清理失效分享', confirmCleanupD: '將刪除所有已過期、已撤銷、已達下載上限的分享連結。',
+    cleanedN: '已清理 {n} 條失效分享', shareRevoked: '分享已撤銷',
+    // 直鏈彈窗     // 直鏈彈窗 shareRevoked: '分享已撤銷', 列表 列表
+    directCreated: '直鏈已建立 ✨', directCreatedSub: '複製下面的連結直接下載',
+    directUrlLabel: '直鏈（/d/xxx）',
+    directModalNotes: '備註（可選）', directModalNotesPh: '給直鏈起個備註名方便區分',
+    directLinksTitle: '直鏈', cleanupDirects: '清理失效直鏈',
+    stDirectActive: '有效', stDirectExpired: '已過期', stDirectRevoked: '已撤銷', stDirectMaxed: '已滿額',
+    revokeDirect: '撤銷', noDirectLinks: '還沒有直鏈，去「檔案」頁建立一個',
+    confirmCleanupDirectT: '清理失效直鏈', confirmCleanupDirectD: '將刪除所有已過期、已撤銷、已達下載上限的直鏈。',
+    cleanedDirectN: '已清理 {n} 條失效直鏈', directRevoked: '直鏈已撤銷',
+    confirmRevokeDirectT: '撤銷直鏈', confirmRevokeDirectD: '撤銷後該連結將立即失效，無法恢復。',
+    confirmRevokeT: '撤銷分享', confirmRevokeD: '撤銷後該連結將立即失效，無法恢復。',
+    // 記錄
+    logsTitle: '下載記錄', totalN: '共 {n} 條', searchPlaceholder: '搜尋 IP / 檔名…',
+    clear30: '清理 30 天前', clearAll: '清空全部', prev: '‹ 上一頁', next: '下一頁 ›', pageOf: '第 {a} / {b} 頁',
+    noMatch: '沒有匹配的記錄', noLogs: '還沒有下載記錄',
+    confirmClear30T: '清理記錄', confirmClear30D: '刪除 30 天前的所有下載記錄，以減少儲存佔用。',
+    confirmClearAllT: '清空全部記錄',
+    confirmClearAllD: '將刪除所有下載記錄（流量統計與分享下載計數不受影響）。此操作不可恢復。',
+    clearedN: '已清理 {n} 條記錄',
+    // 錯誤日誌
+    tabErrorLogs: '錯誤日誌',
+    errLogsTitle: '錯誤日誌', errLogsSub: '前端與後端捕獲到的異常會自動記錄在這裡，方便反饋給開發者排查。',
+    errLogsRecent: '近 24 小時 {n} 條', errLogsAllGood: '暫無報錯，一切正常',
+    errLogsEmpty: '還沒有錯誤日誌', errLogsNoMatch: '沒有匹配的錯誤',
+    errSourceAll: '全部來源', errSourceFrontend: '前端', errSourceBackend: '後端', errSourceApi: '介面',
+    errSearchPh: '搜尋錯誤資訊 / 路徑…',
+    errColTime: '時間', errColSource: '來源', errColMessage: '錯誤資訊', errColWhere: '位置', errColDevice: '裝置',
+    errDetail: '詳情', errContext: '上下文', errStack: '堆疊', errNoStack: '無堆疊資訊',
+    errClear30: '清理 30 天前', errClearAll: '清空全部',
+    errConfirmClear30T: '清理錯誤日誌', errConfirmClear30D: '刪除 30 天前的所有錯誤日誌，以減少儲存佔用。',
+    errConfirmClearAllT: '清空錯誤日誌', errConfirmClearAllD: '將刪除所有錯誤日誌，此操作不可恢復。',
+    errClearedN: '已清理 {n} 條錯誤日誌',
+    // 封禁
+    manualBan: '手動封禁 IP', ipPlaceholder: 'IP 地址，如 1.2.3.4', reasonPlaceholder: '原因（可選）', ban: '封禁',
+    banTip: '重複下載超限的 IP 會被系統自動封禁（可在「設定」調整引數），此處可手動補充封禁。',
+    banList: '封禁名單', unban: '解封', noBans: '當前沒有封禁任何 IP',
+    bannedIp: '已封禁 {ip}', unbannedIp: '已解封 {ip}', enterIp: '請輸入 IP 地址',
+    // 設定
+    siteName: '站點名稱', siteNameD: '顯示在分享頁和後臺標題',
+    trafficLimit: '月度流量限額（GB）',
+    trafficLimitD: '本月已用 {used}。流量達到限額後，所有下載自動暫停，防止流量超額產生費用。設為 0 表示不限制，每月自動重置。',
+    resetTraffic: '重置本月流量', resetTrafficD: '將已用流量清零，立即恢復下載服務', reset: '重置',
+    perIp: '單 IP 最大下載次數',
+    perIpD: '同一 IP 在統計視窗內對同一資源最多可下載的次數，超出後攔截。設為 0 表示不限制。',
+    window: '統計視窗（小時）', windowD: '統計單 IP 重複下載的時間範圍。設為 0 表示永久累計。',
+    autoBan: '超限自動封禁', autoBanD: '開啟後，重複下載超限的 IP 會被自動加入封禁名單',
+    banHours: '封禁時長（小時）', banHoursD: '自動封禁的持續時間，到期自動解封。設為 0 表示永久封禁直至手動解封。',
+    clearLogs: '清除下載記錄', clearLogsD: '刪除下載明細以減少 D1 儲存佔用（流量統計與分享下載計數不受影響）',
+    trafficResetOk: '本月流量已重置', confirmResetT: '重置流量',
+    confirmResetD: '將本月已用流量清零並立即恢復下載服務？',
+    // 檔案刪除
+    deleteFileT: '刪除檔案', deleteFileD: '確定刪除「{name}」？其所有分享連結和下載記錄也會一併刪除。',
+    fileDeleted: '檔案已刪除',
+    loadingErr: '載入失敗',
+    // 分享密碼顯示
+    showPassword: '顯示', hidePassword: '隱藏', copyPassword: '複製密碼',
+    passwordCol: '密碼', noPassword: '無',
+    // 登入安全
+    secTitle: '登入安全審計',
+    secSubtitle: '記錄每次登入成功/失敗/登出操作，防止盜號',
+    secBadgeFail24h: '最近 24h 失敗 {n} 次',
+    secBadgeSafe: '🔒 登入狀態良好',
+    actionLogin: '登入', actionLogout: '登出',
+    actionFail: '登入失敗', actionRateLimited: '觸發限流',
+    resultSuccess: '成功', resultFail: '失敗',
+    colAction: '操作', colResult: '結果', colReason: '原因', colLoginTime: '時間',
+    secReasonInvalid: '金鑰錯誤', secReasonRateLimited: '嘗試過於頻繁', secReasonSession: '會話失效',
+    secClear30: '清理 30 天前', secClearAll: '清空全部',
+    secConfirmClear30T: '清理登入日誌', secConfirmClear30D: '刪除 30 天前的所有登入日誌。',
+    secConfirmClearAllT: '清空全部登入日誌', secConfirmClearAllD: '將刪除所有登入日誌，此操作不可恢復。',
+    secClearedN: '已清理 {n} 條記錄',
+    secNoLogs: '還沒有登入記錄', secSearchPh: '搜尋 IP / 瀏覽器 / 系統…',
+    secFilterAll: '全部結果', secFilterSuccess: '僅成功', secFilterFail: '僅失敗',
+    secActionAll: '全部操作',
+    // 管理員第三方登入方式（GitHub / Google / Microsoft）
+    tabLoginMethods: '登入方式',
+    adminLoginMethod: '管理員登入方式',
+    adminLoginMethodD: '把第三方賬號（GitHub / Google / Microsoft）繫結為管理員登入方式。繫結後，登入後臺可直接用該賬號登入，無需輸入管理金鑰。',
+    lmConfigTitle: '{name} 應用配置',
+    lmConfigD: '把下方的回撥地址填入 {name} 開放平臺應用的 Redirect URI（回撥地址），再填入 Client ID 與 Client Secret。',
+    lmWhereGithub: 'GitHub → Settings → Developer settings → OAuth Apps → New OAuth App',
+    lmWhereGoogle: 'Google Cloud Console → API 和服務 → 憑據 → 建立 OAuth 客戶端 ID（型別：Web 應用）',
+    lmWhereMicrosoft: 'Azure Portal → 應用註冊 → 新註冊（賬戶型別建議選「任何組織目錄中的賬戶和個人賬戶」）',
+    lmClientId: 'Client ID',
+    lmClientIdPh: '{name} 應用的 Client ID',
+    lmClientSecret: 'Client Secret',
+    lmClientSecretPh: '輸入後儲存；留空則保留現有 Secret',
+    lmSecretConfigured: '已配置',
+    lmSecretNotConfigured: '未配置',
+    lmCallbackUrl: '回撥地址 (Redirect URI)',
+    lmNotBound: '尚未繫結賬號',
+    lmBoundAs: '已繫結',
+    lmBind: '繫結 {name}',
+    lmUnbind: '解綁',
+    lmBindHint: '點選後跳轉 {name} 授權，完成後自動返回',
+    lmEnableLogin: '啟用 {name} 登入',
+    lmEnableLoginD: '開啟後，登入頁會顯示「使用 {name} 登入」按鈕',
+    lmLoginDisabledHint: '需先繫結賬號才能啟用',
+    lmSave: '儲存配置',
+    lmSaved: '配置已儲存',
+    lmBoundOk: '{name} 賬號繫結成功',
+    lmUnboundOk: '已解綁 {name} 賬號',
+    lmNeedConfig: '請先填寫並儲存 Client ID / Secret',
+    lmConfirmUnbindT: '解綁 {name} 賬號', lmConfirmUnbindD: '解綁後將無法使用該賬號登入，需重新繫結。確定解綁嗎？',
+    lmLoginBtn: '使用 {name} 登入',
+    lmOrLogin: '或使用第三方賬號登入',
+    lmErrNotAvailable: '{name} 登入當前不可用',
+    lmErrNotBound: '該賬號不是已繫結的管理員賬號',
+    lmErrUnsupported: '不支援的登入方式',
+    lmErrGeneric: '登入失敗',
+    lmErrState: '登入狀態校驗失敗，請重新發起（可能已超時）',
+    lmErrRedirect: '回撥地址不匹配：請確認應用後臺登記的 Redirect URI 與控制台顯示的回撥地址完全一致',
+    lmErrSecret: 'Client Secret 解密失敗：可能管理金鑰已更換，請重新填寫 Secret',
+    lmErrNotConfigured: '該登入方式尚未配置 Client ID / Secret',
+    // 2FA 登入
+    login2faTitle: '兩步驗證',
+    login2faSub: '請輸入 Authenticator 應用中的 6 位驗證碼',
+    login2faPh: '6 位驗證碼',
+    login2faCode: '驗證碼',
+    login2faUseRecovery: '使用恢復碼',
+    login2faBack: '← 返回',
+    login2faRecoveryPh: '16 位恢復碼（空格可選）',
+    login2faRecoveryHint: '如果 Authenticator 丟失，可以輸入恢復碼登入並自動關閉 2FA',
+    login2faRecoveryOk: '恢復碼驗證成功，2FA 已自動重置',
+    // 管理員 IP 白名單
+    ipWhitelist: '管理員 IP 白名單',
+    ipWhitelistD: '限制哪些 IP 可以訪問 /admin 後臺。留空 = 不限制；配置後，只有白名單 IP 能登入，且這些 IP 的下載不受流量限額約束。',
+    ipWhitelistPh: '每行一個，或用逗號分隔。支援精確 IP（1.2.3.4）和 CIDR（10.0.0.0/8）',
+    ipWhitelistOn: '已啟用',
+    ipWhitelistOff: '未啟用（任何 IP 都能訪問 /admin）',
+    ipWhitelistHint: '格式：每行一個條目 或 用逗號分隔。例：192.168.1.1, 10.0.0.0/8, 203.0.113.0/24',
+    // 下載市場首頁
+    homeRedirectMarket: '下載市場作為首頁',
+    homeRedirectMarketD: '訪客直接訪問域名根路徑 / 時，自動跳轉到下載市場頁面（/market）而不是管理後臺（/admin）',
+    homeRedirectMarketHint: '預設關閉。開啟後，您的站點首頁就是下載市場，普通訪客無法直接看到 /admin。管理員仍然可以通過 /admin 顯式訪問後臺。',
+    codesFloatingBtn: '🎟️ 啟用碼浮動按鈕',
+    codesFloatingBtnD: '在分享頁右上角（或左上角）顯示一個卡片圖示，使用者點選後可繫結啟用碼、查詢額度、解綁',
+    codesFloatingBtnHint: '預設開啟。關閉後用戶只能通過 URL 引數 ?code=XXX 攜帶啟用碼（不推薦）',
+    codesFloatingBtnPosition: '按鈕位置',
+    codesFloatingBtnPosRight: '右上角',
+    codesFloatingBtnPosLeft: '左上角',
+    // 自定義標籤頁
+    tabCfgTitle: '🧩 自定義標籤頁',
+    tabCfgD: '調整後臺側邊欄標籤頁的顯示與順序，改動即時生效並儲存。',
+    tabCfgNote: '「系統設定」標籤是管理入口，始終可見、不可隱藏。',
+    tabCfgExport: '匯出配置',
+    tabCfgImport: '匯入配置',
+    tabCfgReset: '還原預設',
+    tabCfgResetT: '還原預設標籤設定',
+    tabCfgResetD: '將標籤的顯示與順序恢復為預設配置？',
+    tabCfgExportOk: '配置已匯出',
+    tabCfgImportOk: '配置已匯入並應用',
+    tabCfgImportFail: '匯入失敗',
+    tabCfgSaved: '標籤設定已儲存',
+    tabCfgMoveUp: '上移',
+    tabCfgMoveDown: '下移',
+    tabCfgLockedHint: '該標籤為管理入口，不可隱藏',
+
+    // 2FA 設定
+    twofa: '兩步驗證 (TOTP)',
+    twofaD: '使用 Google Authenticator / Microsoft Authenticator 等應用生成驗證碼',
+    twofaSetupT: '開啟兩步驗證',
+    twofaSetupD1: '用 Authenticator 掃描下方二維碼，或手動輸入金鑰',
+    twofaSetupKey: '手動輸入金鑰',
+    twofaSetupCodePh: '輸入 6 位驗證碼',
+    twofaSetupCode: '驗證碼',
+    twofaSetupDone: '2FA 已開啟 ✅',
+    twofaSetupRecoveryT: '請立即儲存以下恢復碼',
+    twofaSetupRecoveryD: '恢復碼可在 Authenticator 丟失時恢復登入。僅本次顯示，請複製儲存到安全位置。Cloudflare 後臺也可以配置超級恢復碼作為備份。',
+    twofaSetupRecoveryAll: '全部儲存',
+    twofaSetupRecoveryCopied: '恢復碼已複製',
+    twofaDisableT: '關閉兩步驗證',
+    twofaDisableD: '關閉後登入只需管理員金鑰，不再需要 2FA 碼。請確認你瞭解風險。',
+    twofaRegenT: '重新生成恢復碼',
+    twofaRegenD: '舊的恢復碼將全部失效，生成 8 個新的恢復碼。',
+    twofaAdminKeyPh: '請輸入管理員金鑰確認',
+    twofaNoCloudflareRecovery: '未配置 Cloudflare 超級恢復碼（可選）',
+    twofaHasCloudflareRecovery: '已配置 Cloudflare 超級恢復碼 ✅',
+    twofaRecoveryRemaining: '剩餘恢復碼 {n} 個',
+    twofaStatusOn: '已開啟',
+    twofaStatusOff: '未開啟',
+    // 登入密碼（面板密碼，與主金鑰解耦）
+    pwTitle: '登入密碼',
+    pwD: '設定後登入只認此密碼，環境變數 admin 退化為純加密主金鑰（不再用於登入）。改密後其他裝置會自動退出，當前裝置保持登入。',
+    pwCurrent: '當前密碼',
+    pwCurrentPhEnv: '尚未設定過面板密碼，請填環境變數 admin 的值',
+    pwCurrentPhPanel: '輸入當前登入密碼',
+    pwNew: '新密碼',
+    pwNewPh: '至少 8 位',
+    pwConfirm: '確認新密碼',
+    pwSave: '修改密碼',
+    pwSaving: '儲存中…',
+    pwMismatch: '兩次輸入的新密碼不一致',
+    pwTooShort: '新密碼長度需在 8-128 位之間',
+    pwOk: '密碼已更新 ✅ 本裝置保持登入，其他裝置已退出',
+    pwStatusEnv: '當前使用環境變數 admin 登入（尚未設定面板密碼）',
+    pwStatusPanel: '已使用面板密碼登入 ✅',
+    // Turnstile
+    tsGroupTitle: '🛡️ Cloudflare Turnstile 人機驗證',
+    tsGroupD: '防止機器人爬蟲濫用分享連結。可按觸發時機選擇開啟，並按每日訪問閾值決定對某 IP 是否彈出。',
+    tsMode: '觸發時機',
+    tsModeOff: '關閉',
+    tsModeShare: '開啟分享連結時',
+    tsModeDownload: '點選下載時',
+    tsModeBoth: '兩者都可以（雙重保險）',
+    tsThreshold: '每 IP 每日觸發閾值（次）',
+    tsThresholdHelp: '0 = 每次都彈；N = 該 IP 當天訪問分享頁超過 N 次後開始彈',
+    tsSitekeyOverride: 'SiteKey 覆蓋（可選）',
+    tsSitekeyOverrideHelp: '如果你沒在 Cloudflare Secret 裡配 turnstile_sitekey，可在此填入',
+    tsSecretOverride: 'Turnstile Secret',
+    tsSecretPlaceholder: '填入 Secret Key（與 SiteKey 同一面板獲取）',
+    tsSecretKeep: '留空不改動',
+    tsSecretInCloudflare: '已在 Cloudflare Secret 中（優先使用）',
+    tsSecretInDatabase: '已在資料庫中加密儲存',
+    tsInCloudflare: '已在 Cloudflare Secret 中',
+    tsInDatabase: '已在資料庫中配置',
+    tsMissingBoth: 'Cloudflare Secret 和資料庫都未配置，需要填寫',
+    tsSecretHint: '可以填在這裡（加密存入資料庫），也可以在 Cloudflare Secret 裡配 turnstile_secret（優先）',
+    tsSecretOk: '已配置 ✅',
+    tsSecretMissing: '未配置 ❌',
+    tsSitekeyCloudflareOk: 'SiteKey 已在 Cloudflare Secret 配置 ✅',
+    tsSitekeyCloudflareMissing: '未在 Cloudflare Secret 配置 turnstile_sitekey',
+    tsResetVisits: '重置今日訪問計數',
+    tsResetVisitsD: '清空所有 IP 今日訪問計數，讓它們重新從頭開始計數。',
+    tsVisitsReset: '訪問計數已重置',
+    // OAuth2
+    oauthGroupTitle: '🔐 OAuth2 下載登入',
+    oauthGroupD: '管理員啟用後，訪客必須通過第三方賬號登入才能下載。所有配置（client_id / secret）均在 D1 資料庫中加密儲存，不會進 Cloudflare Secret。',
+    oauthEnable: '啟用 OAuth2',
+    oauthProvider: 'OAuth2 服務商',
+    oauthClientId: 'Client ID',
+    oauthClientSecret: 'Client Secret',
+    oauthClientSecretHelp: '在服務商後臺申請，會用 admin 金鑰加密存入資料庫',
+    oauthSecretConfigured: '已配置',
+    oauthSecretNotConfigured: '未配置',
+    oauthSecretClear: '清除 Secret',
+    oauthScope: 'Scope（授權範圍）',
+    oauthCustomUrls: '自定義 Provider URL（只有選了 Custom 才生效）',
+    oauthCustomAuthorize: '授權端點 (Authorization URL)',
+    oauthCustomToken: '令牌端點 (Token URL)',
+    oauthCustomUserinfo: '使用者資訊端點 (Userinfo URL)',
+    oauthCustomTokenField: 'Token 返回欄位名',
+    oauthCallbackUrl: '回撥地址（複製到服務商後臺）',
+    oauthCallbackHint: '在服務商 OAuth2 設定中，把此 URL 填入 Redirect URI / Callback URL 欄位',
+    oauthTest: '測試配置',
+    oauthTestOk: 'OAuth2 配置有效',
+    oauthTestFail: 'OAuth2 配置不完整或有錯誤',
+    // 新增多 Provider 相關
+    configureTurnstile: '配置 Turnstile',
+    oauthNoProviders: '還沒有配置任何 OAuth2 Provider',
+    oauthEnabledN: '已啟用 {n} 個 Provider',
+    oauthNoEnabled: '總開關已開啟，但沒有啟用任何 Provider',
+    oauthDisabled: '未啟用',
+    oauthConfigure: '⚙️ 配置',
+    oauthEnable: '啟用',
+    oauthDisable: '停用',
+    oauthAddProvider: '新增 Provider',
+    oauthEditTitle: '編輯 OAuth2 Provider',
+    oauthAddTitle: '新增 OAuth2 Provider',
+    oauthLabel: '顯示名稱',
+    oauthKeepSecret: '保持現有 Secret 不變',
+    // 儲存後端（出站）
+    storageBackendTitle: '💾 儲存後端',
+    storageBackendD: '預設使用 Cloudflare R2（零配置）；也可掛載外部 S3 相容儲存或任何支援 WebDAV 的網盤（堅果雲 / 阿里雲盤 / OneDrive / Nextcloud 等）',
+    bigUploadTitle: '📦 大檔案分片上傳',
+    bigUploadD: '允許上傳超過 100 MB 的檔案（瀏覽器分片 + 儲存 Multipart 組裝，僅 R2 / S3 支援）。關閉後單檔案最大仍可傳 100 MB。',
+    storageBackendR2: 'Cloudflare R2（預設）',
+    storageBackendS3: 'S3 相容儲存',
+    storageBackendWebDAV: '遠端 WebDAV 網盤',
+    storageBackendNotSet: '未配置',
+    storageBackendUrl: '伺服器地址',
+    storageBackendUser: '使用者名稱',
+    storageBackendPwd: '密碼',
+    storageBackendPwdKeep: '留空保持不變',
+    storageBackendConfig: '配置',
+    storageBackendTest: '測試連線',
+    storageBackendConnected: '連線成功',
+    storageBackendConnectFail: '連線失敗',
+    // WebDAV
+    webdavGroupTitle: '🗂️ WebDAV 檔案共享',
+    webdavGroupD: '開啟後可通過 WebDAV 客戶端（Finder / Explorer / nPlayer 等）以讀寫方式管理檔案，也能直接在瀏覽器位址列掛載',
+    webdavEnable: '啟用 WebDAV 服務',
+    webdavUsername: '使用者名稱',
+    webdavPassword: '密碼',
+    webdavPasswordPh: '留空不改動',
+    webdavPasswordSet: '已設定',
+    webdavPasswordUnset: '未設定',
+    webdavPasswordClear: '清除密碼',
+    webdavRootPath: '可訪問根路徑',
+    webdavRootPathHelp: '預設 "/" = 全部檔案；可設 "/shared" 等限制範圍',
+    webdavUrl: 'WebDAV 地址',
+    webdavUrlHint: '在 WebDAV 客戶端裡用這個地址掛載',
+    // 資料庫工具
+    dbToolsTitle: '🧰 資料庫健康',
+    dbToolsD: '自動檢測表、列、索引和遷移版本是否完整。舊版本升級後如果新功能缺失，點"修復"讓資料庫同步到最新 schema。',
+    dbHealthy: '✓ 資料庫結構完整',
+    dbNeedRepair: '⚠ 檢測到 schema 異常',
+    dbTables: '表結構',
+    dbColumns: '缺失的列',
+    dbIndexes: '缺失的索引',
+    dbMigration: '遷移進度',
+    dbTablesOk: '{a} / {b} 表就緒',
+    dbMissingCount: '缺 {n} 項',
+    dbRepairBtn: '🔧 修復資料庫',
+    dbRepairConfirmT: '修復資料庫 schema？',
+    dbRepairConfirmD: '將自動建立缺失的表、補上缺失的列和索引、重跑未執行的遷移。此操作不會刪除任何現有資料。',
+    dbRepairing: '正在修復資料庫…',
+    dbRepairOk: '資料庫修復完成 ✅',
+    dbRepairFail: '資料庫修復失敗',
+    dbRepairDetailTables: '建立表',
+    dbRepairDetailCols: '補列',
+    dbRepairDetailIdx: '索引',
+    dbRepairDetailMigrations: '遷移',
+    dbRepairDetailTime: '耗時',
+    dbStatusRefresh: '重新整理狀態',
+    dbStatusMissingTables: '缺失的表',
+    dbStatusMissingCols: '缺失的列',
+    dbStatusMissingIdx: '缺失的索引',
+    dbTableRows: '錶行數',
+    // UI 主題
+    uiThemeTitle: '🎨 介面主題',
+    uiThemeD: '白色 Apple 風格（預設）更清爽；暗色經典風格適合夜間使用。',
+    uiThemeLight: '☀️ 淺色',
+    uiThemeDark: '🌙 深色',
+    confirmDeleteTitle: '確認刪除',
+    confirmOAuthDeleteD: '刪除後此 Provider 的配置將永久刪除。已生成的 OAuth2 會話不受影響，但新登入請求將無法使用此 Provider。確定刪除嗎？',
+    custom: '自定義',
+    cancel: '取消',
+    // 全球分佈
+    globalTitle: '🌍 全球下載分佈',
+    globalSub: '可自由拖動旋轉的 3D 地球儀，圓點越大代表下載量越高，滑鼠懸停顯示國家譯名、數量與時區。',
+    globalDays: '統計天數',
+    globalTotalDownloads: '總下載',
+    globalTotalBytes: '總流量',
+    globalCountries: '覆蓋國家',
+    globalEmpty: '選定時段內暫無下載記錄',
+    globalCountry: '國家/地區',
+    globalDownloads: '下載次數',
+    globalBytes: '流量',
+    globalUniqueIps: '獨立 IP',
+    globalUniqueFiles: '檔案數',
+    globalTimezone: '時區',
+    globalDragHint: '拖動旋轉 · 滾輪縮放 · 懸停圓點檢視國家詳情',
+    globalGeoSource: '資料來源：D1 下載日誌（國家程式碼）',
+    globalAnalyticsHint: '啟用 Cloudflare Analytics Engine 後可顯示精確經緯度',
+    // 啟用碼
+    tabCodes: '啟用碼',
+    codesTitle: '🎟️ 啟用碼管理',
+    codesSub: '批次生成帶獨立流量額度的啟用碼，使用者使用啟用碼下載不受全域性流量限制。額度耗盡或過期自動停用。',
+    codesUsageTitle: '用量概覽',
+    codesGenerateTitle: '批次生成啟用碼',
+    codesBatchId: '批次標識（自動生成）',
+    codesPlanName: '分類/套餐名（可選）',
+    codesCount: '生成數量',
+    codesTraffic: '總流量額度 (GB，0=純時效碼)',
+    codesDays: '有效天數 (0=不限)',
+    codesQuotaMsg: '耗盡時自定義提示（可選）',
+    codesNotes: '備註（可選）',
+    codesGenerate: '生成啟用碼',
+    codesGeneratedN: '成功生成 {n} 個啟用碼',
+    codesGeneratedPreview: '前 50 個啟用碼（其餘請用 CSV 匯出完整列表）',
+    codesExportCsv: '匯出 CSV',
+    codesListTitle: '啟用碼列表',
+    codesFilterStatus: '狀態',
+    codesFilterBatch: '批次',
+    codesFilterPlan: '分類',
+    codesFilterQ: '搜尋碼/備註',
+    codesFilterAll: '全部',
+    codesColCode: '啟用碼',
+    codesColPlan: '分類',
+    codesColBatch: '批次',
+    codesColTraffic: '流量額度',
+    codesColUsed: '已用',
+    codesColDays: '有效天數',
+    codesColStatus: '狀態',
+    codesColCreated: '建立時間',
+    codesColActivated: '首次使用',
+    codesColExpires: '過期時間',
+    codesRevokeOne: '作廢',
+    codesRevokeBatch: '按批次作廢',
+    codesRevokeCodes: '按碼作廢',
+    codesConfirmRevokeT: '確認作廢',
+    codesConfirmRevokeD: '作廢後該啟用碼將無法繼續使用，已使用的流量記錄保留。',
+    codesBatchRevokeOk: '已作廢 {n} 個啟用碼',
+    codesStatusUnused: '未使用',
+    codesStatusActive: '使用中',
+    codesStatusExpired: '已過期',
+    codesStatusExhausted: '已耗盡',
+    codesStatusRevoked: '已作廢',
+    codesRemainingInfinite: '無限',
+    codesUnlimited: '不限',
+    codesNoCodes: '暫無啟用碼',
+    codesQueryRemain: '查詢剩餘流量',
+    codesQueryRemainPh: '輸入啟用碼查詢剩餘額度',
+    codesQueryRemainBtn: '查詢',
+    codesQueryNotFound: '啟用碼不存在',
+    codesQueryResult: '剩餘 {remaining} / 總 {total}',
+    codesQueryResultInfinite: '剩餘 ∞ (無限額度)',
+    codesPerBatch: '批次 {id}',
   },
   en: {
     docTitle: '{site} · Admin Console',
     // 通用
     login: 'Log in', logout: 'Log out', cancel: 'Cancel', confirm: 'Confirm', copy: 'Copy', close: 'Close',
     copied: 'Copied to clipboard', save: 'Save Settings', saved: 'Settings saved', forever: 'Forever',
-    switchTo: '中文', topbarSub: 'Admin console · Cloudflare Workers + R2',
+    switchTo: '简体中文', topbarSub: 'Admin console · Cloudflare Workers + R2',
     // 登录
     loginSubtitle: 'Admin console · Enter your admin key to continue', keyPlaceholder: 'Admin key (admin)',
     // 标签
@@ -1549,25 +2005,27 @@ const I18N = {
 function detectLang(){
   try {
     const saved = localStorage.getItem('cd_lang');
-    if (saved === 'zh' || saved === 'en') return saved;
+    if (['zh', 'zh-TW', 'en'].includes(saved)) return saved;
   } catch {}
   const first = String((navigator.languages && navigator.languages.length ? navigator.languages[0] : navigator.language) || '').toLowerCase();
-  if (first.startsWith('zh')) return 'zh';
+  if (first.startsWith('zh')) return /hant|tw|hk|mo/.test(first) ? 'zh-TW' : 'zh';
   if (first) return 'en';
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-    if (/^Asia\/(Shanghai|Chongqing|Harbin|Urumqi|Kashgar|Hong_Kong|Macau|Taipei)$/.test(tz)) return 'zh';
+    if (/^Asia\/(Shanghai|Chongqing|Harbin|Urumqi|Kashgar)$/.test(tz)) return 'zh';
+    if (/^Asia\/(Hong_Kong|Macau|Taipei)$/.test(tz)) return 'zh-TW';
   } catch {}
   return 'en';
 }
 
 let LANG = detectLang();
+const IS_ZH = LANG.startsWith('zh');
 const t = (key, params) => {
   let s = (I18N[LANG] && I18N[LANG][key]) ?? I18N.en[key] ?? key;
   if (params) for (const k in params) s = s.split('{' + k + '}').join(params[k]);
   return s;
 };
-document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : LANG === 'zh-TW' ? 'zh-TW' : 'en';
 
 /* ═══════════ 工具函数 ═══════════ */
 const $ = (s, el=document) => el.querySelector(s);
@@ -1715,7 +2173,7 @@ const confirmDialog = (title, msg, danger=true) => new Promise(resolve => {
 });
 
 function toggleLang(){
-  try { localStorage.setItem('cd_lang', LANG === 'zh' ? 'en' : 'zh'); } catch {}
+  try { localStorage.setItem('cd_lang', LANG === 'zh' ? 'zh-TW' : LANG === 'zh-TW' ? 'en' : 'zh'); } catch {}
   location.reload();
 }
 
@@ -2295,7 +2753,7 @@ async function loadOverview(){
   }
   const maxDl = Math.max(1, ...s.chart.map(c => c.downloads));
   const c = s.counts;
-  const tip = n => LANG === 'zh' ? `${n} ${t('times')} · ${fmtSize(0)}` : `${n} · ${fmtSize(0)}`;
+  const tip = n => IS_ZH ? `${n} ${t('times')} · ${fmtSize(0)}` : `${n} · ${fmtSize(0)}`;
   $('#view').innerHTML = `
     ${s.traffic.quota_exceeded ? `
     <div class="banner">
@@ -2332,7 +2790,7 @@ async function loadOverview(){
         ${s.chart.map(d => `
         <div class="col">
           <div class="bar" style="height:${Math.max(3, Math.round(d.downloads/maxDl*112))}px">
-            <span>${d.downloads}${LANG==='zh'?' 次':''} · ${fmtSize(d.bytes)}</span>
+            <span>${d.downloads}${IS_ZH?' 次':''} · ${fmtSize(d.bytes)}</span>
           </div>
           <div class="day">${d.day.slice(5).replace('-','/')}</div>
         </div>`).join('')}
@@ -3494,30 +3952,30 @@ function ensureECharts(){
 
 /** ISO 3166 国家代码 → 国名映射（用于 tooltip） */
 const COUNTRY_NAMES = {
-  'US': '美国', 'CN': '中国', 'JP': '日本', 'KR': '韩国', 'GB': '英国', 'DE': '德国',
-  'FR': '法国', 'CA': '加拿大', 'AU': '澳大利亚', 'BR': '巴西', 'IN': '印度',
-  'RU': '俄罗斯', 'IT': '意大利', 'ES': '西班牙', 'NL': '荷兰', 'PL': '波兰',
+  'US': '美國', 'CN': '中國', 'JP': '日本', 'KR': '韓國', 'GB': '英國', 'DE': '德國',
+  'FR': '法國', 'CA': '加拿大', 'AU': '澳大利亞', 'BR': '巴西', 'IN': '印度',
+  'RU': '俄羅斯', 'IT': '義大利', 'ES': '西班牙', 'NL': '荷蘭', 'PL': '波蘭',
   'TR': '土耳其', 'MX': '墨西哥', 'AR': '阿根廷', 'ZA': '南非', 'SG': '新加坡',
-  'HK': '香港', 'TW': '台湾', 'TH': '泰国', 'VN': '越南', 'ID': '印度尼西亚',
-  'PH': '菲律宾', 'MY': '马来西亚', 'NZ': '新西兰', 'SE': '瑞典', 'NO': '挪威',
-  'FI': '芬兰', 'DK': '丹麦', 'CH': '瑞士', 'AT': '奥地利', 'BE': '比利时',
-  'IE': '爱尔兰', 'PT': '葡萄牙', 'GR': '希腊', 'IL': '以色列', 'AE': '阿联酋',
-  'SA': '沙特阿拉伯', 'EG': '埃及', 'MA': '摩洛哥', 'NG': '尼日利亚', 'KE': '肯尼亚',
-  'CO': '哥伦比亚', 'CL': '智利', 'PE': '秘鲁', 'UA': '乌克兰', 'CZ': '捷克',
-  'HU': '匈牙利', 'RO': '罗马尼亚', 'BG': '保加利亚', 'HR': '克罗地亚', 'RS': '塞尔维亚',
-  'SK': '斯洛伐克', 'SI': '斯洛文尼亚', 'LT': '立陶宛', 'LV': '拉脱维亚', 'EE': '爱沙尼亚',
-  'IS': '冰岛', 'LU': '卢森堡', 'MT': '马耳他', 'CY': '塞浦路斯', 'QA': '卡塔尔',
-  'KW': '科威特', 'BH': '巴林', 'OM': '阿曼', 'JO': '约旦', 'LB': '黎巴嫩',
-  'IR': '伊朗', 'IQ': '伊拉克', 'PK': '巴基斯坦', 'BD': '孟加拉国', 'LK': '斯里兰卡',
-  'NP': '尼泊尔', 'MM': '缅甸', 'KH': '柬埔寨', 'LA': '老挝', 'BD': '文莱',
-  'TT': '特立尼达和多巴哥', 'XX': '未知/未分类', 'ZZ': '未知/未分类',
+  'HK': '香港', 'TW': '臺灣', 'TH': '泰國', 'VN': '越南', 'ID': '印度尼西亞',
+  'PH': '菲律賓', 'MY': '馬來西亞', 'NZ': '紐西蘭', 'SE': '瑞典', 'NO': '挪威',
+  'FI': '芬蘭', 'DK': '丹麥', 'CH': '瑞士', 'AT': '奧地利', 'BE': '比利時',
+  'IE': '愛爾蘭', 'PT': '葡萄牙', 'GR': '希臘', 'IL': '以色列', 'AE': '阿聯酋',
+  'SA': '沙烏地阿拉伯', 'EG': '埃及', 'MA': '摩洛哥', 'NG': '奈及利亞', 'KE': '肯亞',
+  'CO': '哥倫比亞', 'CL': '智利', 'PE': '秘魯', 'UA': '烏克蘭', 'CZ': '捷克',
+  'HU': '匈牙利', 'RO': '羅馬尼亞', 'BG': '保加利亞', 'HR': '克羅埃西亞', 'RS': '塞爾維亞',
+  'SK': '斯洛伐克', 'SI': '斯洛維尼亞', 'LT': '立陶宛', 'LV': '拉脫維亞', 'EE': '愛沙尼亞',
+  'IS': '冰島', 'LU': '盧森堡', 'MT': '馬耳他', 'CY': '塞普勒斯', 'QA': '卡達',
+  'KW': '科威特', 'BH': '巴林', 'OM': '阿曼', 'JO': '約旦', 'LB': '黎巴嫩',
+  'IR': '伊朗', 'IQ': '伊拉克', 'PK': '巴基斯坦', 'BD': '孟加拉國', 'LK': '斯里蘭卡',
+  'NP': '尼泊爾', 'MM': '緬甸', 'KH': '柬埔寨', 'LA': '寮國', 'BD': '汶萊',
+  'TT': '千里達及托巴哥', 'XX': '未知/未分類', 'ZZ': '未知/未分類',
   // English
   'US_EN': 'United States', 'CN_EN': 'China', 'JP_EN': 'Japan', 'KR_EN': 'South Korea',
 };
 
 function countryName(code){
-  if (!code || code === 'ZZ' || code === 'XX') return LANG === 'zh' ? '未知/未分类' : 'Unknown';
-  if (LANG === 'zh') return COUNTRY_NAMES[code] || code;
+  if (!code || code === 'ZZ' || code === 'XX') return IS_ZH ? '未知/未分類' : 'Unknown';
+  if (IS_ZH) return COUNTRY_NAMES[code] || code;
   return COUNTRY_NAMES[code + '_EN'] || code;
 }
 
@@ -3577,7 +4035,7 @@ function heatColor(t){
 async function loadGlobal(){
   const days = globalDays || 30;
   const v = $('#view');
-  v.innerHTML = `<div class="glass section" style="padding:24px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px"><div><h2 style="margin:0;font-size:18px">${esc(t('globalTitle'))}</h2><div style="color:var(--text-3);font-size:12.5px;margin-top:4px">${esc(t('globalSub'))}</div></div><div style="display:flex;gap:8px;align-items:center"><span style="color:var(--text-3);font-size:13px">${esc(t('globalDays'))}</span><select id="g-days" class="sel">${[7,14,30,90,365].map(d=>`<option value="${d}"${d===days?' selected':''}>${d}${LANG==='zh'?' 天':'d'}</option>`).join('')}</select></div></div><div id="globe" style="width:100%;height:520px;border-radius:16px;background:radial-gradient(circle at 50% 45%,#0b1226 0%,#070a14 70%);cursor:grab"></div><div style="margin-top:8px;color:var(--text-3);font-size:12px;text-align:center">${esc(t('globalDragHint'))}</div><div id="global-totals" style="display:flex;gap:16px;margin-top:16px"></div><div id="global-table-wrap" style="margin-top:16px"></div></div>`;
+  v.innerHTML = `<div class="glass section" style="padding:24px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px"><div><h2 style="margin:0;font-size:18px">${esc(t('globalTitle'))}</h2><div style="color:var(--text-3);font-size:12.5px;margin-top:4px">${esc(t('globalSub'))}</div></div><div style="display:flex;gap:8px;align-items:center"><span style="color:var(--text-3);font-size:13px">${esc(t('globalDays'))}</span><select id="g-days" class="sel">${[7,14,30,90,365].map(d=>`<option value="${d}"${d===days?' selected':''}>${d}${IS_ZH?' 天':'d'}</option>`).join('')}</select></div></div><div id="globe" style="width:100%;height:520px;border-radius:16px;background:radial-gradient(circle at 50% 45%,#0b1226 0%,#070a14 70%);cursor:grab"></div><div style="margin-top:8px;color:var(--text-3);font-size:12px;text-align:center">${esc(t('globalDragHint'))}</div><div id="global-totals" style="display:flex;gap:16px;margin-top:16px"></div><div id="global-table-wrap" style="margin-top:16px"></div></div>`;
   $('#g-days').onchange = e => { globalDays = Number(e.target.value); loadGlobal(); };
 
   const data = await api('/api/admin/global/stats?since_days=' + days);
@@ -3687,7 +4145,7 @@ async function loadGlobal(){
     series: [{
       type: 'scatter3D',
       coordinateSystem: 'globe',
-      name: LANG === 'zh' ? '下载分布' : 'Downloads',
+      name: IS_ZH ? '下載分布' : 'Downloads',
       symbolSize: (val) => {
         const d = (val && val[2]) || 0;
         return Math.max(7, Math.min(34, 7 + Math.sqrt(d / maxDownloads) * 27));
@@ -3736,7 +4194,7 @@ async function loadGlobal(){
   $('#global-table-wrap').innerHTML = `
     <div class="glass section" style="padding:20px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h3 style="margin:0;font-size:14px;color:var(--text-2)">${LANG==='zh'?'国家/地区排行 · Top 20':'Top 20 Countries'}</h3>
+        <h3 style="margin:0;font-size:14px;color:var(--text-2)">${IS_ZH?'國家/地區排行 · Top 20':'Top 20 Countries'}</h3>
         <span style="color:var(--text-3);font-size:12px">${esc(t('globalGeoSource'))}</span>
       </div>
       <table class="tbl">
@@ -4044,7 +4502,7 @@ async function loadWebDAV(){
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:18px">
         <div style="background:var(--sf-soft);border-radius:14px;padding:14px;border:1px solid var(--stroke)">
           <div style="color:var(--text-3);font-size:12px">${esc(t('webdavEnable'))}</div>
-          <div style="font-size:18px;font-weight:600;margin-top:4px;color:${s.webdav_enabled ? '#16a34a' : '#9ca3af'}">${s.webdav_enabled ? (LANG==='zh'?'已启用':'Enabled') : (LANG==='zh'?'未启用':'Disabled')}</div>
+          <div style="font-size:18px;font-weight:600;margin-top:4px;color:${s.webdav_enabled ? '#16a34a' : '#9ca3af'}">${s.webdav_enabled ? (IS_ZH?'已启用':'Enabled') : (IS_ZH?'未启用':'Disabled')}</div>
         </div>
         <div style="background:var(--sf-soft);border-radius:14px;padding:14px;border:1px solid var(--stroke)">
           <div style="color:var(--text-3);font-size:12px">${esc(t('webdavUsername'))}</div>
@@ -4069,7 +4527,7 @@ async function loadWebDAV(){
       <div class="row" style="padding:14px 0;border:none;border-bottom:1px solid var(--stroke);display:flex;align-items:center;justify-content:space-between;gap:12px">
         <div class="info" style="flex:1;min-width:0">
           <div class="t" style="font-size:14.5px;font-weight:600">${esc(t('webdavEnable'))}</div>
-          <div class="d" style="margin-top:3px;font-size:12.5px;color:var(--text-3);line-height:1.5">${LANG==='zh'?'开启后，可通过 WebDAV 客户端访问以下地址':'Once enabled, connect to the URL below from any WebDAV client'}</div>
+          <div class="d" style="margin-top:3px;font-size:12.5px;color:var(--text-3);line-height:1.5">${IS_ZH?'開啟後，可透過 WebDAV 用戶端存取以下地址':'Once enabled, connect to the URL below from any WebDAV client'}</div>
         </div>
         <label class="switch" style="flex:none">
           <input type="checkbox" id="wd-enable" ${s.webdav_enabled?'checked':''}>
@@ -4118,14 +4576,14 @@ async function loadWebDAV(){
   // 清除密码按钮
   $('#wd-clear')?.addEventListener('click', async () => {
     if (!(await confirmDialog(
-      LANG==='zh'?'确认清除密码？':'Clear password?',
-      LANG==='zh'?'清除后，下次保存时需要重新输入密码才能保护 WebDAV。':'After clearing, you must set a new password on the next save to protect WebDAV.'
+      IS_ZH?'確認清除密碼？':'Clear password?',
+      IS_ZH?'清除後，下次保存時需要重新輸入密碼才能保護 WebDAV。':'After clearing, you must set a new password on the next save to protect WebDAV.'
     ))) return;
     await api('/api/admin/settings', {
       method: 'PUT',
       body: JSON.stringify({ webdav_password: '__clear__' }),
     });
-    toast(LANG==='zh'?'密码已清除':'Password cleared', 'ok');
+    toast(IS_ZH?'密碼已清除':'Password cleared', 'ok');
     loadWebDAV();
   });
 
@@ -4695,7 +5153,7 @@ async function loadSettings(){
     openModal(`
       <h3>🔗 WebDAV ${esc(t('storageBackendConfig'))}</h3>
       <div class="sub" style="font-size:12.5px;line-height:1.6">
-        ${LANG==='zh'
+        ${IS_ZH
           ? '填入任意支持 WebDAV 的网盘地址，如：<br>• 坚果云: <code>https://dav.jianguoyun.com/dav/</code><br>• OneDrive: <code>https://dav.onedrive.com/</code>'
           : 'Enter any WebDAV-enabled cloud drive URL, e.g.:<br>• Jianguoyun: <code>https://dav.jianguoyun.com/dav/</code><br>• OneDrive: <code>https://dav.onedrive.com/</code>'}
       </div>
@@ -4712,8 +5170,8 @@ async function loadSettings(){
         <input type="password" id="wd-pwd" value="" placeholder="${s.storage_webdav_password_configured ? esc(t('storageBackendPwdKeep')) : ''}" style="width:100%;padding:10px 12px;border-radius:12px;font-size:13px;color:var(--text);background:var(--sf-input);border:1px solid var(--stroke-strong);outline:none;font-family:ui-monospace,'SF Mono',monospace">
         <div class="tip" style="line-height:1.6;margin-top:4px">
           ${s.storage_webdav_password_configured
-            ? `<span style="color:#6ee7b7">✓ ${LANG==='zh'?'已设置':'Set'}</span> — ${esc(t('storageBackendPwdKeep'))}`
-            : `<span style="color:#fda293">⚠ ${LANG==='zh'?'未设置':'Not set'}</span>`}
+            ? `<span style="color:#6ee7b7">✓ ${IS_ZH?'已设置':'Set'}</span> — ${esc(t('storageBackendPwdKeep'))}`
+            : `<span style="color:#fda293">⚠ ${IS_ZH?'未設置':'Not set'}</span>`}
         </div>
       </div>
       <div class="field" style="margin-top:4px">
@@ -4732,7 +5190,7 @@ async function loadSettings(){
       const user = $('#wd-user').value.trim();
       const pwd = $('#wd-pwd').value.trim();
       const result = $('#wd-test-result');
-      if (!url || !user) { result.textContent = LANG==='zh' ? '请填写 URL 和用户名' : 'URL and username required'; result.style.color = '#fda293'; return; }
+      if (!url || !user) { result.textContent = IS_ZH ? '請填寫 URL 和用戶名' : 'URL and username required'; result.style.color = '#fda293'; return; }
       result.textContent = '…'; result.style.color = 'var(--text-3)';
       try {
         const payload = { provider: 'webdav', url, username: user };

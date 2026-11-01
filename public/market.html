@@ -167,7 +167,7 @@ const I18N = {
     statsPerpagePrefix: '每页',
     statsPerpageSuffix: '条',
     footerText: 'Powered by cloud-r2pan · <a href="/admin">管理后台</a>',
-    switchTo: 'EN',
+    switchTo: '繁體中文',
     loading: '加载中…',
     loadFailTitle: '加载失败',
     loadFailDesc: '稍后再试',
@@ -191,6 +191,44 @@ const I18N = {
     minutesAgo: '{n}分钟前',
     hoursAgo: '{n}小时前',
     daysAgo: '{n}天前',
+  }, 'zh-TW': {
+    pageTitle: '下載市場 · cloud-r2pan',
+    brandTitle: '下載市場',
+    brandSubtitle: '發現、分享、下載',
+    searchPlaceholder: '搜尋檔名、標題或描述…',
+    sortHot: '🔥 熱度最高',
+    sortNewest: '🆕 最新發布',
+    sortDownloads: '⬇️ 下載量',
+    sortViews: '👁 瀏覽量',
+    statsTotalPrefix: '共',
+    statsTotalSuffix: '個資源',
+    statsPerpagePrefix: '每頁',
+    statsPerpageSuffix: '條',
+    footerText: 'Powered by cloud-r2pan · <a href="/admin">管理後臺</a>',
+    switchTo: 'English',
+    loading: '載入中…',
+    loadFailTitle: '載入失敗',
+    loadFailDesc: '稍後再試',
+    networkErrTitle: '網路錯誤',
+    networkErrDesc: '請檢查網路連線',
+    emptySearchTitle: '沒找到相關資源',
+    emptySearchDesc: '試試換個關鍵詞',
+    emptyMarketTitle: '下載市場還是空的',
+    emptyMarketDesc: '管理員還沒有公開任何檔案',
+    noDesc: '暫無描述',
+    heatChampion: '👑 冠軍',
+    heatRank2: '🥈',
+    heatRank3: '🥉',
+    downloadsLabel: '下載',
+    viewsLabel: '瀏覽',
+    prevPage: '‹',
+    nextPage: '›',
+    pagesInfoPrefix: '共',
+    pagesInfoSuffix: '頁',
+    recent: '剛剛',
+    minutesAgo: '{n}分鐘前',
+    hoursAgo: '{n}小時前',
+    daysAgo: '{n}天前',
   },
   en: {
     pageTitle: 'Marketplace · cloud-r2pan',
@@ -206,7 +244,7 @@ const I18N = {
     statsPerpagePrefix: '',
     statsPerpageSuffix: 'per page',
     footerText: 'Powered by cloud-r2pan · <a href="/admin">Admin</a>',
-    switchTo: '中文',
+    switchTo: '简体中文',
     loading: 'Loading…',
     loadFailTitle: 'Failed to load',
     loadFailDesc: 'Please try again later',
@@ -237,19 +275,21 @@ const I18N = {
 function detectLang(){
   try {
     const saved = localStorage.getItem('cd_lang');
-    if (saved === 'zh' || saved === 'en') return saved;
+    if (['zh', 'zh-TW', 'en'].includes(saved)) return saved;
   } catch {}
   const first = String((navigator.languages && navigator.languages.length ? navigator.languages[0] : navigator.language) || '').toLowerCase();
-  if (first.startsWith('zh')) return 'zh';
+  if (first.startsWith('zh')) return /hant|tw|hk|mo/.test(first) ? 'zh-TW' : 'zh';
   if (first) return 'en';
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-    if (/^Asia\/(Shanghai|Chongqing|Harbin|Urumqi|Kashgar|Hong_Kong|Macau|Taipei)$/.test(tz)) return 'zh';
+    if (/^Asia\/(Shanghai|Chongqing|Harbin|Urumqi|Kashgar)$/.test(tz)) return 'zh';
+    if (/^Asia\/(Hong_Kong|Macau|Taipei)$/.test(tz)) return 'zh-TW';
   } catch {}
   return 'en';
 }
 
 let LANG = detectLang();
+const IS_ZH = LANG.startsWith('zh');
 const t = (key, params) => {
   let s = (I18N[LANG] && I18N[LANG][key]) ?? I18N.en[key] ?? key;
   if (params) for (const k in params) s = s.split('{' + k + '}').join(params[k]);
@@ -257,7 +297,7 @@ const t = (key, params) => {
 };
 
 // 应用 i18n 到静态元素
-document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : LANG === 'zh-TW' ? 'zh-TW' : 'en';
 document.title = t('pageTitle');
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -280,9 +320,9 @@ $('#stats-total-suffix').textContent = t('statsTotalSuffix');
 $('#stats-perpage-prefix').textContent = t('statsPerpagePrefix');
 $('#stats-perpage-suffix').textContent = t('statsPerpageSuffix');
 $('#footer-text').innerHTML = t('footerText');
-$('#lang-toggle').textContent = t('switchTo');
+$('#lang-toggle').textContent = ({ 'zh': '繁體中文', 'zh-TW': 'English', 'en': '简体中文' })[LANG] || t('switchTo');
 $('#lang-toggle').onclick = () => {
-  try { localStorage.setItem('cd_lang', LANG === 'zh' ? 'en' : 'zh'); } catch {}
+  try { localStorage.setItem('cd_lang', LANG === 'zh' ? 'zh-TW' : LANG === 'zh-TW' ? 'en' : 'zh'); } catch {}
   location.reload();
 };
 
